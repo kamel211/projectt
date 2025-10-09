@@ -12,7 +12,7 @@ router = APIRouter(
     prefix="/login",
     tags=["Login"]
 )
-
+#هيني  قاعده بعدل على الشغل 
 SECRET_KEY = "197b2c37c391bed93fe80344fe73b806947a65e36206e05a1a23c2fa12702fe3"
 ALGORITHM = "HS256"
 

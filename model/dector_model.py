@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
 from database import Base
-
+# this is table  dectors
 class Dector(Base):
     __tablename__ = 'dector' 
 

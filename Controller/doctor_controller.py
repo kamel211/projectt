@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-import jwt
+from jose import jwt
 from model.doctor_model import Dector
 
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

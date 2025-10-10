@@ -1,13 +1,19 @@
-from fastapi import APIRouter, status
-from core.dependencies import db_dependency
-from controllers import dector_controller as dectorController
+from fastapi import APIRouter, Depends, Header
+from sqlalchemy.orm import Session
+from database import get_db
+from Controller import doctor_controller
 
-router = APIRouter(prefix="/dector", tags=["Dector"])
+router = APIRouter(prefix="/dector", tags=["Dector Auth"])
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register_dector(request: dectorController.CreateDectorRequest, db: db_dependency):
-    return dectorController.registerDector(db, request)
+@router.post("/register")
+def register(request: doctor_controller.CreateDectorRequest, db: Session = Depends(get_db)):
+    return doctor_controller.registerDector(db, request)
 
 @router.post("/login")
-async def login_dector(request: dectorController.LoginDectorRequest, db: db_dependency):
-    return dectorController.loginDector(db, request)
+def login(request: doctor_controller.LoginDectorRequest, db: Session = Depends(get_db)):
+    return doctor_controller.loginDector(db, request)
+
+@router.post("/logout")
+def logout(Authorization: str = Header(...)):
+    token = Authorization.split(" ")[1]  # نأخذ التوكن من الهيدر
+    return doctor_controller.logoutDector(token)

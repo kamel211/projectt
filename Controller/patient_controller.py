@@ -4,7 +4,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import jwt
-from model.doctor_model import Dector
+from model.patient_model import Users
 
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = "mysecretkey"
@@ -12,8 +12,8 @@ ALGORITHM = "HS256"
 blacklisted_tokens = set()
 
 # ----------- النماذج -------------
-class CreateDectorRequest(BaseModel):
-    username: str
+class CreateUserRequest(BaseModel):
+    username:str
     email: str
     first_name: str
     last_name: str
@@ -21,7 +21,7 @@ class CreateDectorRequest(BaseModel):
     role: str
     phone_number: str
 
-class LoginDectorRequest(BaseModel):
+class LoginUserRequest(BaseModel):
     username: str
     password: str
 
@@ -44,12 +44,12 @@ def verify_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 # ----------- الوظائف الرئيسية -------------
-def registerDector(db: Session, request: CreateDectorRequest):
-    existing = db.query(Dector).filter(Dector.username == request.username).first()
-    if existing:
+def registerUser(db: Session, request: CreateUserRequest):
+    existing_user = db.query(Users).filter(Users.username == request.username).first()
+    if existing_user:
         raise HTTPException(status_code=400, detail="Username already exists")
 
-    new_dector = Dector(
+    new_user = Users(
         email=request.email,
         username=request.username,
         first_name=request.first_name,
@@ -58,23 +58,23 @@ def registerDector(db: Session, request: CreateDectorRequest):
         hashed_password=bcrypt_context.hash(request.password),
         phone_number=request.phone_number
     )
-    db.add(new_dector)
+    db.add(new_user)
     db.commit()
-    db.refresh(new_dector)
-    return {"message": "Dector registered successfully"}
+    db.refresh(new_user)
+    return {"message": "User registered successfully"}
 
-def loginDector(db: Session, request: LoginDectorRequest):
-    dector = db.query(Dector).filter(Dector.username == request.username).first()
-    if not dector or not bcrypt_context.verify(request.password, dector.hashed_password):
+def loginUser(db: Session, request: LoginUserRequest):
+    user = db.query(Users).filter(Users.username == request.username).first()
+    if not user or not bcrypt_context.verify(request.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    token = create_access_token(dector.username)
+    token = create_access_token(user.username)
     return {
-        "message": f"Welcome Dr. {dector.username}",
+        "message": f"Welcome {user.username}",
         "access_token": token,
         "token_type": "bearer"
     }
 
-def logoutDector(token: str):
+def logoutUser(token: str):
     blacklisted_tokens.add(token)
     return {"message": "Logged out successfully"}

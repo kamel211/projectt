@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
 from database import Base
+from model.appointment_model import Appointment
 
 class Users(Base):
     __tablename__ = 'patient'  # اسم الجدول الصحيح
@@ -15,4 +16,5 @@ class Users(Base):
 
     # علاقة المستخدم بالصور
     images = relationship("Images", back_populates="user")
+    appointments = relationship("Appointment", back_populates="user")
 

@@ -40,7 +40,7 @@ def upload_to_local(file: UploadFile, user_id: int, db: Session):
             "id": new_image.id,
             "filename": new_image.filename,
             "url": new_image.url,
-            "user_id": new_image.user_id
+            "user_id": new_image.user_id 
         }
 
     except Exception as e:

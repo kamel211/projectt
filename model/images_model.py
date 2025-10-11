@@ -2,7 +2,7 @@
 from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base
-from patient_model import Users
+from model.patient_model import Users
 
 class Images(Base):
     __tablename__ = "images"

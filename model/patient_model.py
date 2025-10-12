@@ -14,6 +14,7 @@ class Users(Base):
 
     # العلاقة مع المواعيد
     appointments = relationship("Appointment", back_populates="patient")'''
+
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
@@ -33,18 +34,6 @@ class Users(Base):
     # الحقول الإضافية
     role = Column(String(50), default="patient")  # دور المستخدم
     phone_number = Column(String(20))  # رقم الهاتف
-    
-    # حقول الوقت والتاريخ
-    created_at = Column(DateTime, default=datetime.utcnow)  # وقت الإنشاء
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # وقت التحديث
-    is_active = Column(Boolean, default=True)  # مفعل/غير مفعل
-    is_verified = Column(Boolean, default=False)  # موثق/غير موثق
-
-    # العلاقة مع جدول المواعيد
+    # جدول المواعيد
     appointments = relationship("Appointment", back_populates="patient")
     
-    def __repr__(self):
-        return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
-    
-    def get_full_name(self):
-        return f"{self.first_name} {self.last_name}"

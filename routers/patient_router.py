@@ -100,6 +100,7 @@ def update_patient_profile_endpoint(
 ):
     return update_patient_profile(update_data, db, user)
 '''
+
 from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy.orm import Session
 from database import get_db
@@ -166,4 +167,3 @@ def update_patient_profile_endpoint(
     user: Users = Depends(get_current_patient)
 ):
     return update_patient_profile(update_data, db, user)
-''

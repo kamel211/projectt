@@ -1,18 +1,39 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+# from sqlalchemy import create_engine, text
+# from sqlalchemy.orm import sessionmaker, declarative_base
+from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure
 
-SQLALCHEMY_DATABASE_URL = "postgresql+psycopg2://postgres:douha@localhost:5432/project"
+# # =============== PostgreSQL Connection ===============
+# SQLALCHEMY_DATABASE_URL = "postgresql+psycopg2://postgres:douha@localhost:5432/project"
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+# try:
+#     engine = create_engine(SQLALCHEMY_DATABASE_URL)
+#     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+#     Base = declarative_base()
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+#     # اختبار الاتصال بـ PostgreSQL
+#     with engine.connect() as conn:
+#         conn.execute(text("SELECT 1"))
+#     print(" Connected to PostgreSQL successfully!")
 
-Base = declarative_base()
+# except Exception as e:
+#     print(" PostgreSQL connection failed:", e)
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
+# =============== MongoDB Connection ===============
+MONGO_URL = "mongodb+srv://kamelbataineh:Kamel123@cluster0.cf0rmeu.mongodb.net/university_project?retryWrites=true&w=majority&appName=Cluster0"
+
+try:
+    mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+    mongo_client.server_info() 
+    mongo_db = mongo_client["university_project"]
+    print(" Connected to MongoDB successfully!")
+
+except ConnectionFailure as e:
+    print(" MongoDB connection failed:", e)
+except Exception as e:
+    print("MongoDB unknown error:", e)
+
+
+
+# pip install uvicorn

@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
 from database import Base
+from appointment_model import Appointment
 
 class Doctors(Base):
     __tablename__ = "doctor"
@@ -13,3 +14,4 @@ class Doctors(Base):
 
     # العلاقة مع المواعيد
     appointments = relationship("Appointment", back_populates="doctor")
+

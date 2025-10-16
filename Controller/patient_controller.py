@@ -44,7 +44,8 @@ class CreateUserRequest(BaseModel):
     phone_number: str
 
 class LoginUserRequest(BaseModel):
-    username: str
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
     password: str
 
 class ChangePasswordRequest(BaseModel):
@@ -150,13 +151,21 @@ async def send_login_notification(email_to: EmailStr, user, ip_address: str = "�
         print(f"❌ فشل إرسال الإشعار إلى {email_to}: {e}")
 
 
-def login_user(request_data: LoginUserRequest, request: Request):
-    user = patients_collection.find_one({"username": request_data.username})
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+# الدالة المعدلة لتسجيل الدخول
+async def login_user(request_data: LoginUserRequest, request: Request):
+    # إنشاء query ديناميكي لدعم username أو email
+    query = {}
+    if request_data.username:
+        query["username"] = request_data.username
+    elif request_data.email:
+        query["email"] = request_data.email
+    else:
+        raise HTTPException(status_code=400, detail="يرجى إدخال اسم المستخدم أو البريد الإلكتروني")
 
-    if not bcrypt_context.verify(request_data.password, user["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+    user = patients_collection.find_one(query)
+
+    if not user or not bcrypt_context.verify(request_data.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
 
     if not user.get("is_active", True):
         raise HTTPException(status_code=400, detail="الحساب غير مفعل. يرجى التواصل مع الإدارة.")
@@ -164,8 +173,7 @@ def login_user(request_data: LoginUserRequest, request: Request):
     token = create_access_token(user["username"], str(user["_id"]))
     client_host = request.client.host if request.client else "غير معروف"
 
-    asyncio.create_task(send_login_notification(user["email"], user, client_host))
-
+    # الرد بشكل منسق
     return {
         "message": f"مرحباً بعودتك {user['first_name']}!",
         "access_token": token,

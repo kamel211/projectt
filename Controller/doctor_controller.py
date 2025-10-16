@@ -27,8 +27,9 @@ class CreateDoctorRequest(BaseModel):
     phone_number: str
 
 class LoginDoctorRequest(BaseModel):
-    username: str
+    login: str  
     password: str
+
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
@@ -91,10 +92,19 @@ def register_doctor(request: CreateDoctorRequest):
     result = doctors_collection.insert_one(new_doctor)
     return {"message": "Doctor registered successfully", "doctor_id": str(result.inserted_id)}
 
+
 def login_doctor(request_data: LoginDoctorRequest, request: Request):
-    doctor = doctors_collection.find_one({"username": request_data.username})
+    # البحث عن الطبيب باستخدام البريد الإلكتروني أو اسم المستخدم
+    doctor = doctors_collection.find_one({
+        "$or": [
+            {"username": request_data.login},
+            {"email": request_data.login}
+        ]
+    })
+
     if not doctor or not bcrypt_context.verify(request_data.password, doctor["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail="Invalid username or email or password")
+
     if not doctor.get("is_active", True):
         raise HTTPException(status_code=400, detail="الحساب غير مفعل. يرجى التواصل مع الإدارة.")
 

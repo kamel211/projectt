@@ -19,10 +19,10 @@ router = APIRouter(prefix="/patients", tags=["Patients Auth"])
 def register(request: CreateUserRequest):
     return register_user(request)
 
-# تسجيل الدخول للمريض
+
 @router.post("/login")
-def login(request: LoginUserRequest, req: Request):
-    return login_user(request, req)
+async def login(request: LoginUserRequest, req: Request):
+    return await login_user(request, req)
 
 # تسجيل الخروج للمريض
 @router.post("/logout")

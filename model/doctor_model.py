@@ -14,10 +14,3 @@ class Doctors(Base):
 
     # العلاقة مع المواعيد
     appointments = relationship("Appointment", back_populates="doctor")
-'''
-<<<<<<< HEAD
-=======
-
-
->>>>>>> a95bd7cc0af2808d0540dd673dc45f876e4edea0
-'''

@@ -84,6 +84,9 @@ def cancel_appointment(db: Session, user: Users, appointment_id: int):
 
     if appointment.status == "Cancelled":
         raise HTTPException(status_code=400, detail="Appointment already cancelled")
+#  مابقدر الغي موعد ان صاير قبل وقت قديم
+    if appointment.date_time < datetime.now():
+     raise HTTPException(status_code=400, detail="Cannot cancel a past appointment")
 
     appointment.status = "Cancelled"
     db.commit()

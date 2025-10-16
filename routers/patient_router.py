@@ -52,7 +52,8 @@ def get_current_patient_info(current_user: dict = Depends(get_current_patient)):
         "full_name": f"{current_user['first_name']} {current_user['last_name']}"
     }
 
-# تحديث بيانات المريض
+# تحديث بيانات المريض]
+#######################kamel
 @router.put("/profile")
 def update_patient_profile_endpoint(
     update_data: UpdatePatientRequest,

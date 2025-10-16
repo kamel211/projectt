@@ -16,12 +16,12 @@ class Appointment(Base):
 
     # العلاقة مع المريض
     patient = relationship("Users", back_populates="appointments")
-<<<<<<< HEAD
+
     #العلاقه مع الدكتور 
     doctor = relationship("Doctors", back_populates="appointments")
 
  
-=======
+
 
 
 
@@ -44,4 +44,4 @@ class Appointment(Base):
 
 #     doctor = relationship("Doctors", back_populates="appointments")
 #     patient = relationship("Patients", back_populates="appointments")
->>>>>>> a95bd7cc0af2808d0540dd673dc45f876e4edea0
+#>>>>>>> a95bd7cc0af2808d0540dd673dc45f876e4edea0

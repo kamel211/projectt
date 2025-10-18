@@ -4,6 +4,7 @@ from model.appointment_model import Appointment
 from model.doctor_model import Doctors
 from model.patient_model import Users
 from datetime import datetime, time
+from model.appointment_schema import AppointmentRequest
 
 # ------------------------
 # 0️⃣ جلب كل الدكاترة

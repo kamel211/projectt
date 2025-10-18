@@ -27,9 +27,9 @@ class CreateDoctorRequest(BaseModel):
     phone_number: str
 
 class LoginDoctorRequest(BaseModel):
-    login: str  
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
     password: str
-
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
@@ -94,16 +94,21 @@ def register_doctor(request: CreateDoctorRequest):
 
 
 def login_doctor(request_data: LoginDoctorRequest, request: Request):
-    # البحث عن الطبيب باستخدام البريد الإلكتروني أو اسم المستخدم
-    doctor = doctors_collection.find_one({
-        "$or": [
-            {"username": request_data.login},
-            {"email": request_data.login}
-        ]
-    })
+    # التحقق أن المستخدم أرسل إما الإيميل أو اسم المستخدم
+    if not request_data.username and not request_data.email:
+        raise HTTPException(status_code=400, detail="يجب إدخال البريد الإلكتروني أو اسم المستخدم")
+
+    # البحث عن الطبيب باستخدام أحدهما
+    query = {}
+    if request_data.username:
+        query = {"username": request_data.username}
+    elif request_data.email:
+        query = {"email": request_data.email}
+
+    doctor = doctors_collection.find_one(query)
 
     if not doctor or not bcrypt_context.verify(request_data.password, doctor["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid username or email or password")
+        raise HTTPException(status_code=401, detail="Invalid username/email or password")
 
     if not doctor.get("is_active", True):
         raise HTTPException(status_code=400, detail="الحساب غير مفعل. يرجى التواصل مع الإدارة.")
@@ -122,7 +127,6 @@ def login_doctor(request_data: LoginDoctorRequest, request: Request):
             "appointments": doctor.get("appointments", [])
         }
     }
-
 def logout_doctor(token: str):
     blacklisted_tokens.add(token)
     return {"message": "Logged out successfully"}

@@ -28,6 +28,9 @@ try:
     mongo_client.server_info() 
     mongo_db = mongo_client["university_project"]
     print(" Connected to MongoDB successfully!")
+    doctors_collection = mongo_db["doctors"]
+    appointments_collection = mongo_db["appointments"]
+    patients_collection = mongo_db["patients"]
 
 except ConnectionFailure as e:
     print(" MongoDB connection failed:", e)

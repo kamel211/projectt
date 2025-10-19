@@ -19,3 +19,31 @@ def get_user_id_from_token(token: str) -> str:
         return user_id
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+def get_doctor_id_from_token(token: str):
+    """
+    دالة لاستخراج id الدكتور من JWT
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        doctor_id = payload.get("id")  # تأكد أن الـ key هنا هو "id" وليس "sub"
+        if not doctor_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return doctor_id
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+
+# def get_doctor_id_from_token(token: str):
+#     """
+#     دالة لاستخراج id الدكتور من JWT
+#     """
+#     try:
+#         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+#         doctor_id = payload.get("sub")
+#         if not doctor_id:
+#             raise HTTPException(status_code=401, detail="Invalid token")
+#         return doctor_id
+#     except JWTError:
+#         raise HTTPException(status_code=401, detail="Invalid token")

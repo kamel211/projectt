@@ -6,8 +6,9 @@ from fastapi.security import OAuth2PasswordBearer
 from bson import ObjectId
 from bson.errors import InvalidId
 from datetime import datetime
-from core.auth_utils import get_user_id_from_token  # دالة استخراج id من JWT
+from core.auth_utils import get_user_id_from_token,get_doctor_id_from_token # دالة استخراج id من JWT
 from database import appointments_collection, doctors_collection, patients_collection
+
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -146,3 +147,41 @@ def cancel_appointment(appointment_id: str, token: str = Depends(oauth2_scheme))
 
     appointments_collection.update_one({"_id": appt_obj_id}, {"$set": {"status": "Cancelled"}})
     return {"message": "Appointment cancelled successfully"}
+
+
+@router.post("/approve-cancel/{appointment_id}")
+def approve_cancel_appointment(appointment_id: str, token: str = Depends(oauth2_scheme)):
+    """الدكتور يوافق على إلغاء موعد"""
+    doctor_id = get_doctor_id_from_token(token)
+    try:
+        appt_obj_id = ObjectId(appointment_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid appointment_id")
+
+    # ------------------ هنا مؤقت للتأكد من البيانات ------------------
+    appointment = appointments_collection.find_one({"_id": appt_obj_id})
+    print(appointment)  # ستشوف كل بيانات الموعد في console
+    # ---------------------------------------------------------------
+
+    if not appointment or appointment.get("status") != "PendingCancellation":
+        raise HTTPException(status_code=404, detail="Appointment not found or not pending cancellation")
+
+    appointments_collection.delete_one({"_id": appt_obj_id})
+    return {"message": "تم إلغاء الموعد بنجاح"}
+
+@router.post("/request-cancel/{appointment_id}")
+def request_cancel_appointment(appointment_id: str, token: str = Depends(oauth2_scheme)):
+    """المريض يطلب إلغاء الموعد → يحتاج موافقة الدكتور"""
+    user_id = get_user_id_from_token(token)
+    try:
+        appt_obj_id = ObjectId(appointment_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid appointment_id")
+
+    appointment = appointments_collection.find_one({"_id": appt_obj_id, "patient_id": user_id})
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    # نغير الحالة إلى PendingCancellation
+    appointments_collection.update_one({"_id": appt_obj_id}, {"$set": {"status": "PendingCancellation"}})
+    return {"message": "تم طلب إلغاء الموعد، بانتظار موافقة الدكتور"}

@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, Header, Request
 from Controller.patient_controller import (
-    CreateUserRequest,
-    LoginUserRequest,
+    CreatePatientRequest,
+    LoginPatientRequest,
     ChangePasswordRequest,
     UpdatePatientRequest,
-    register_user,
-    login_user,
-    logout_user,
+    register_patient,
+    login_patient,
+    logout_patient,
     change_password,
     update_patient_profile,
     get_current_patient
@@ -16,48 +16,51 @@ router = APIRouter(prefix="/patients", tags=["Patients Auth"])
 
 # تسجيل مريض جديد
 @router.post("/register")
-def register(request: CreateUserRequest):
-    return register_user(request)
+def register(request: CreatePatientRequest):
+    return register_patient(request)
 
 
+# تسجيل دخول المريض
 @router.post("/login")
-async def login(request: LoginUserRequest, req: Request):
-    return await login_user(request, req)
+async def login(request: LoginPatientRequest, req: Request):
+    return await login_patient(request, req)
 
-# تسجيل الخروج للمريض
+
+# تسجيل خروج المريض
 @router.post("/logout")
 def logout(Authorization: str = Header(...)):
     token = Authorization.split(" ")[1]
-    return logout_user(token)
+    return logout_patient(token)
 
-# تغيير كلمة المرور
+
+# تغيير كلمة مرور المريض
 @router.put("/change-password")
 def change_patient_password(
     request_data: ChangePasswordRequest,
-    current_user: dict = Depends(get_current_patient)
+    current_patient: dict = Depends(get_current_patient)
 ):
-    return change_password(request_data, current_user)
+    return change_password(request_data, current_patient)
 
-# بيانات المستخدم الحالي
+
+# بيانات المريض الحالي
 @router.get("/me")
-def get_current_patient_info(current_user: dict = Depends(get_current_patient)):
+def get_current_patient_info(current_patient: dict = Depends(get_current_patient)):
     return {
-        "id": str(current_user["_id"]),
-        "username": current_user["username"],
-        "email": current_user["email"],
-        "first_name": current_user["first_name"],
-        "last_name": current_user["last_name"],
-        "phone_number": current_user.get("phone_number", ""),
-        "role": current_user["role"],
-        "full_name": f"{current_user['first_name']} {current_user['last_name']}"
+        "id": str(current_patient["_id"]),
+        "username": current_patient["username"],
+        "email": current_patient["email"],
+        "first_name": current_patient["first_name"],
+        "last_name": current_patient["last_name"],
+        "phone_number": current_patient.get("phone_number", ""),
+        "role": current_patient["role"],
+        "full_name": f"{current_patient['first_name']} {current_patient['last_name']}"
     }
 
-# تحديث بيانات المريض]
-#######################kamel
-@router.put("/profile")
+
+# تحديث بيانات المريض الحالي
+@router.put("/me_update")
 def update_patient_profile_endpoint(
     update_data: UpdatePatientRequest,
-    current_user: dict = Depends(get_current_patient)
+    current_patient: dict = Depends(get_current_patient)
 ):
-    return update_patient_profile(update_data, current_user)
-
+    return update_patient_profile(update_data, current_patient)

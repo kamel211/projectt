@@ -10,5 +10,6 @@ class Images(Base):
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String)
     url = Column(String)
-    user_id = Column(Integer, ForeignKey("patient.id"))  # تم تصحيح اسم الجدول هنا
+    user_id = Column(Integer, ForeignKey("patient.id")) 
+    
     user = relationship("Users", back_populates="images")

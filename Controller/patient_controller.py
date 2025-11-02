@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Depends, Request
+from fastapi import HTTPException, Depends, Request, status
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
@@ -6,13 +6,12 @@ from jose import jwt, JWTError
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
-import asyncio
 from bson import ObjectId
 
-# استدعاء الاتصال من database.py
+# ================== استدعاء الاتصال من database.py ==================
 from database import mongo_db
 
-# اختيار مجموعة المرضى
+# مجموعة المرضى
 patients_collection = mongo_db["patients"]
 
 # ================== إعداد التشفير و JWT ==================
@@ -34,16 +33,15 @@ conf = ConnectionConfig(
 )
 
 # ================== النماذج ==================
-class CreateUserRequest(BaseModel):
+class CreatePatientRequest(BaseModel):
     username: str
     email: EmailStr
     first_name: str
     last_name: str
     password: str
-    role: str
     phone_number: str
 
-class LoginUserRequest(BaseModel):
+class LoginPatientRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
     password: str
@@ -55,8 +53,9 @@ class ChangePasswordRequest(BaseModel):
 class UpdatePatientRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone_number: Optional[str] = None
+    username: Optional[str] = None
     email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
 
 class TokenResponse(BaseModel):
     message: str
@@ -65,9 +64,9 @@ class TokenResponse(BaseModel):
 
 
 # ================== دوال JWT ==================
-def create_access_token(username: str, user_id: str, expires_delta: Optional[timedelta] = None):
+def create_access_token(username: str, patient_id: str, expires_delta: Optional[timedelta] = None):
     expire = datetime.utcnow() + (expires_delta or timedelta(hours=2))
-    payload = {"sub": username, "id": user_id, "exp": expire}
+    payload = {"sub": username, "id": patient_id, "role": "patient", "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -77,42 +76,35 @@ def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
-        if not username:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return username
+        role = payload.get("role")
+        if not username or role != "patient":
+            raise HTTPException(status_code=401, detail="Invalid token or role")
+        return {"username": username, "role": role}
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-MAX_BCRYPT_LENGTH = 72
 
-# ================== دوال المستخدم ==================
-def register_user(request: CreateUserRequest):
-    # تحقق من أن الباسورد لا يتجاوز 72 بايت
+# ================== تسجيل مريض جديد ==================
+def register_patient(request: CreatePatientRequest):
     if len(request.password.encode('utf-8')) > 72:
         raise HTTPException(status_code=400, detail="Password too long, max 72 bytes")
-    
-    # تحقق من وجود مستخدم بنفس الإيميل أو اليوزرنيم
-    existing_user = patients_collection.find_one({
+
+    existing_patient = patients_collection.find_one({
         "$or": [{"username": request.username}, {"email": request.email}]
     })
-    if existing_user:
-        if existing_user["username"] == request.username:
+    if existing_patient:
+        if existing_patient["username"] == request.username:
             raise HTTPException(status_code=400, detail="Username already exists")
         else:
             raise HTTPException(status_code=400, detail="Email already exists")
 
-    # توليد الـ hashed password بأمان
-    MAX_BCRYPT_BYTES = 72
-    password_bytes = request.password.encode('utf-8')[:MAX_BCRYPT_BYTES]
-    hashed_password = bcrypt_context.hash(password_bytes.decode('utf-8', errors='ignore'))
-
-    # إنشاء المستخدم الجديد
-    new_user = {
+    hashed_password = bcrypt_context.hash(request.password)
+    new_patient = {
         "email": request.email,
         "username": request.username,
         "first_name": request.first_name,
         "last_name": request.last_name,
-        "role": request.role,
+        "role": "patient",
         "hashed_password": hashed_password,
         "phone_number": request.phone_number,
         "appointments": [],
@@ -120,40 +112,12 @@ def register_user(request: CreateUserRequest):
         "created_at": datetime.utcnow()
     }
 
-    result = patients_collection.insert_one(new_user)
-    return {"message": "User registered successfully", "user_id": str(result.inserted_id)}
+    result = patients_collection.insert_one(new_patient)
+    return {"message": "Patient registered successfully", "patient_id": str(result.inserted_id)}
 
 
-async def send_login_notification(email_to: EmailStr, user, ip_address: str = "غير معروف"):
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    body = f"""
-مرحبًا {user['first_name']} {user['last_name']}،
-تم تسجيل دخول جديد إلى حسابك في النظام.
-
-📅 التاريخ والوقت: {now}
-🌐 عنوان IP: {ip_address}
-👤 اسم المستخدم: {user['username']}
-
-إذا لم تكن أنت من قام بتسجيل الدخول، يرجى تغيير كلمة المرور فورًا."""
-    
-    message = MessageSchema(
-        subject="تسجيل دخول جديد 👋 - نظام إدارة المستشفى",
-        recipients=[email_to],
-        body=body,
-        subtype="plain"
-    )
-
-    try:
-        fm = FastMail(conf)
-        await fm.send_message(message)
-        print(f"✅ تم إرسال إشعار التسجيل إلى {email_to}")
-    except Exception as e:
-        print(f"❌ فشل إرسال الإشعار إلى {email_to}: {e}")
-
-
-# الدالة المعدلة لتسجيل الدخول
-async def login_user(request_data: LoginUserRequest, request: Request):
-    # إنشاء query ديناميكي لدعم username أو email
+# ================== تسجيل الدخول ==================
+async def login_patient(request_data: LoginPatientRequest, request: Request):
     query = {}
     if request_data.username:
         query["username"] = request_data.username
@@ -162,92 +126,128 @@ async def login_user(request_data: LoginUserRequest, request: Request):
     else:
         raise HTTPException(status_code=400, detail="يرجى إدخال اسم المستخدم أو البريد الإلكتروني")
 
-    user = patients_collection.find_one(query)
-
-    if not user or not bcrypt_context.verify(request_data.password, user["hashed_password"]):
+    patient = patients_collection.find_one(query)
+    if not patient or not bcrypt_context.verify(request_data.password, patient["hashed_password"]):
         raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
 
-    if not user.get("is_active", True):
+    if not patient.get("is_active", True):
         raise HTTPException(status_code=400, detail="الحساب غير مفعل. يرجى التواصل مع الإدارة.")
 
-    token = create_access_token(user["username"], str(user["_id"]))
-    client_host = request.client.host if request.client else "غير معروف"
-
-    # الرد بشكل منسق
+    token = create_access_token(patient["username"], str(patient["_id"]))
     return {
-        "message": f"مرحباً بعودتك {user['first_name']}!",
+        "message": f"مرحباً بعودتك {patient['first_name']}!",
         "access_token": token,
         "token_type": "bearer",
-        "user_id": str(user["_id"]),
-        "user_data": {
-            "username": user["username"],
-            "email": user["email"],
-            "full_name": f"{user['first_name']} {user['last_name']}",
-            "role": user["role"]
+        "patient_id": str(patient["_id"]),
+        "patient_data": {
+            "username": patient["username"],
+            "email": patient["email"],
+            "full_name": f"{patient['first_name']} {patient['last_name']}",
+            "role": "patient"
         }
     }
 
 
-def logout_user(token: str):
+# ================== المريض الحالي ==================
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/patients/login")
+
+def get_current_patient(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if payload.get("role") != "patient":
+        raise HTTPException(status_code=403, detail="Access denied for non-patient")
+    
+    user = patients_collection.find_one({"_id": ObjectId(payload.get("id"))})
+    if not user:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    user["_id"] = str(user["_id"])
+    return {"payload": payload, "user": user}
+
+
+# ================== تسجيل الخروج ==================
+def logout_patient(token: str):
     blacklisted_tokens.add(token)
     return {"message": "Logged out successfully"}
 
 
-def change_password(request_data: ChangePasswordRequest, current_user):
-    if not bcrypt_context.verify(request_data.old_password, current_user["hashed_password"]):
+# ================== تغيير كلمة المرور ==================
+def change_password(request_data: ChangePasswordRequest, current_patient):
+    if not bcrypt_context.verify(request_data.old_password, current_patient["hashed_password"]):
         raise HTTPException(status_code=400, detail="كلمة المرور القديمة غير صحيحة")
 
-    if bcrypt_context.verify(request_data.new_password, current_user["hashed_password"]):
+    if bcrypt_context.verify(request_data.new_password, current_patient["hashed_password"]):
         raise HTTPException(status_code=400, detail="كلمة المرور الجديدة يجب أن تكون مختلفة عن القديمة")
 
     hashed_new_password = bcrypt_context.hash(request_data.new_password)
     patients_collection.update_one(
-        {"_id": current_user["_id"]},
+        {"_id": ObjectId(current_patient["_id"])},
         {"$set": {"hashed_password": hashed_new_password}}
     )
 
     return {"message": "تم تغيير كلمة المرور بنجاح ✅"}
 
 
-def update_patient_profile(update_data: UpdatePatientRequest, current_user):
+# ================== تحديث الملف الشخصي ==================
+def update_patient_profile(update_data: UpdatePatientRequest, current_patient):
     updates = {}
+
     if update_data.first_name:
         updates["first_name"] = update_data.first_name
     if update_data.last_name:
         updates["last_name"] = update_data.last_name
     if update_data.phone_number:
+        existing_phone = patients_collection.find_one({
+            "phone_number": update_data.phone_number,
+            "_id": {"$ne": ObjectId(current_patient["_id"])}
+        })
+        if existing_phone:
+            raise HTTPException(status_code=400, detail="رقم الهاتف مستخدم من قبل ❌")
         updates["phone_number"] = update_data.phone_number
     if update_data.email:
-        existing_user = patients_collection.find_one({"email": update_data.email, "_id": {"$ne": current_user["_id"]}})
-        if existing_user:
-            raise HTTPException(status_code=400, detail="Email already exists")
+        existing_email = patients_collection.find_one({
+            "email": update_data.email,
+            "_id": {"$ne": ObjectId(current_patient["_id"])}
+        })
+        if existing_email:
+            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم مسبقًا ❌")
         updates["email"] = update_data.email
+    if update_data.username:
+        existing_patient = patients_collection.find_one({
+            "username": update_data.username,
+            "_id": {"$ne": ObjectId(current_patient["_id"])}
+        })
+        if existing_patient:
+            raise HTTPException(status_code=409, detail="اسم المستخدم مستخدم مسبقًا ❌")
+        updates["username"] = update_data.username
 
     if updates:
-        patients_collection.update_one({"_id": current_user["_id"]}, {"$set": updates})
+        patients_collection.update_one({"_id": ObjectId(current_patient["_id"])}, {"$set": updates})
 
-    updated_user = patients_collection.find_one({"_id": current_user["_id"]})
-    updated_user["_id"] = str(updated_user["_id"])
+    updated_patient = patients_collection.find_one({"_id": ObjectId(current_patient["_id"])})
+    updated_patient["_id"] = str(updated_patient["_id"])
 
-    return {"message": "تم تحديث البيانات بنجاح ✅", "user": updated_user}
+    profile_data = {
+        "full_name": f"{updated_patient['first_name']} {updated_patient['last_name']}".strip(),
+        "username": updated_patient["username"],
+        "email": updated_patient["email"],
+        "phone_number": updated_patient.get("phone_number", "")
+    }
 
-
-# ================== المستخدم الحالي ==================
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/patients/login")
-
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    username = verify_token(token)
-    user = patients_collection.find_one({"username": username})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-def get_current_patient(token: str = Depends(oauth2_scheme)):
-    return get_current_user(token)
+    return {"message": "تم تحديث البيانات بنجاح ✅", "patient": profile_data}
 
 
-
-
+# ================== عرض الملف الشخصي ==================
+def get_profile_for_current_patient(current_patient: dict):
+    return {
+        "full_name": f"{current_patient.get('first_name', '')} {current_patient.get('last_name', '')}".strip(),
+        "email": current_patient.get("email"),
+        "phone_number": current_patient.get("phone_number"),
+        "username": current_patient.get("username"),
+    }
 
 ##
 ##

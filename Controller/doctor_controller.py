@@ -42,9 +42,9 @@ class UpdateDoctorRequest(BaseModel):
     email: Optional[EmailStr] = None
 
 # ================== دوال JWT ==================
-def create_access_token(username: str, user_id: str, expires_delta: Optional[timedelta] = None):
+def create_access_token(username: str, user_id: str, role: str, expires_delta: Optional[timedelta] = None):
     expire = datetime.utcnow() + (expires_delta or timedelta(hours=2))
-    payload = {"sub": username, "id": user_id, "exp": expire}
+    payload = {"sub": username, "id": user_id, "role": role, "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_token(token: str):
@@ -58,12 +58,17 @@ def verify_token(token: str):
         return username
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-
 # ================== دوال الطبيب ==================
 def register_doctor(request: CreateDoctorRequest):
-    if len(request.password.encode('utf-8')) > MAX_BCRYPT_BYTES:
-        raise HTTPException(status_code=400, detail="Password too long, max 72 bytes")
+    # تأكد أن الباسورد لا يزيد عن 72 بايت
+    password_bytes = request.password.encode('utf-8')
+    if len(password_bytes) > MAX_BCRYPT_BYTES:
+        password_bytes = password_bytes[:MAX_BCRYPT_BYTES]
 
+    # تجزئة الباسورد
+    hashed_password = bcrypt_context.hash(password_bytes.decode('utf-8', errors='ignore'))
+
+    # تحقق من وجود الطبيب مسبقًا
     existing = doctors_collection.find_one({
         "$or": [{"username": request.username}, {"email": request.email}]
     })
@@ -73,9 +78,7 @@ def register_doctor(request: CreateDoctorRequest):
         else:
             raise HTTPException(status_code=400, detail="Email already exists")
 
-    password_bytes = request.password.encode('utf-8')[:MAX_BCRYPT_BYTES]
-    hashed_password = bcrypt_context.hash(password_bytes.decode('utf-8', errors='ignore'))
-
+    # إنشاء الطبيب
     new_doctor = {
         "username": request.username,
         "email": request.email,
@@ -84,7 +87,7 @@ def register_doctor(request: CreateDoctorRequest):
         "role": request.role,
         "hashed_password": hashed_password,
         "phone_number": request.phone_number,
-        "appointments": [],  # جدول المواعيد
+        "appointments": [],
         "is_active": True,
         "created_at": datetime.utcnow()
     }
@@ -113,7 +116,7 @@ def login_doctor(request_data: LoginDoctorRequest, request: Request):
     if not doctor.get("is_active", True):
         raise HTTPException(status_code=400, detail="الحساب غير مفعل. يرجى التواصل مع الإدارة.")
 
-    token = create_access_token(doctor["username"], str(doctor["_id"]))
+    token = create_access_token(doctor["username"], str(doctor["_id"]), doctor["role"])
     return {
         "message": f"Welcome Dr. {doctor['first_name']}!",
         "access_token": token,
@@ -172,9 +175,17 @@ def update_doctor_profile(update_data: UpdateDoctorRequest, current_user):
 
 # ================== المستخدم الحالي ==================
 def get_current_doctor(token: str = Depends(oauth2_scheme)):
-    username = verify_token(token)
-    doctor = doctors_collection.find_one({"username": username})
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if payload.get("role") != "doctor":
+        raise HTTPException(status_code=403, detail="Access denied for non-doctor")
+    
+    doctor = doctors_collection.find_one({"_id": ObjectId(payload.get("id"))})
     if not doctor:
-        raise HTTPException(status_code=401, detail="Doctor not found")
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
     doctor["_id"] = str(doctor["_id"])
-    return doctor
+    return {"payload": payload, "doctor": doctor}

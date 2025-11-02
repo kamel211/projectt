@@ -1,153 +1,236 @@
-from fastapi import HTTPException, APIRouter, Depends
-from sqlalchemy.orm import Session
-from datetime import datetime, time
+# appointment_controller.py
+from fastapi import HTTPException
+from datetime import datetime, time, timedelta
 from jose import jwt
+from typing import List
+from pydantic import BaseModel
+from bson.objectid import ObjectId
+from database import patients_collection, appointments_collection, doctors_collection
+from bson import ObjectId
+from datetime import datetime
+from fastapi import HTTPException
+from database import doctors_collection, appointments_collection, patients_collection
 
-from model.appointment_model import Appointment
-from model.doctor_model import Doctors
-from model.patient_model import Users
-from model.appointment_schema import AppointmentRequest
-from database import get_db
-from fastapi.security import OAuth2PasswordBearer
+SECRET_KEY = "mysecretkey"
 
-router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# -------------------- نموذج المواعيد --------------------
+class AppointmentResponse(BaseModel):
+    appointment_id: str
+    doctor_name: str = None
+    patient_name: str = None
+    date_time: str
+    status: str
+    reason: str = None
 
-# ------------------------
-# 0️⃣ جلب كل الدكاترة
-# ------------------------
-def get_all_doctors(db: Session):
-    doctors = db.query(Doctors).all()
+
+# دالة مساعدة لتحويل ObjectId إلى string
+def convert_objectid(doc):
+    if not doc:
+        return None
+    doc = dict(doc)  # نسخ القاموس لتعديله
+    for key, value in doc.items():
+        if isinstance(value, ObjectId):
+            doc[key] = str(value)
+    return doc
+
+def book_appointment(patient_email: str, doctor_id: str, date_time: datetime, reason: str = ""):
+    # التأكد أن الطبيب موجود
+    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    
+    # البحث عن المريض باستخدام البريد
+    patient = patients_collection.find_one({"email": patient_email})
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    # إنشاء الموعد
+    appointment = {
+        "doctor_id": ObjectId(doctor_id),
+        "patient_id": patient["_id"],
+        "date_time": date_time,
+        "reason": reason,
+        "status": "pending"
+    }
+    
+    result = appointments_collection.insert_one(appointment)
+    appointment["_id"] = str(result.inserted_id)
+    appointment["doctor_id"] = str(appointment["doctor_id"])
+    appointment["patient_id"] = str(appointment["patient_id"])
+    
+    return appointment
+
+# -------------------- التحقق من التوكن --------------------
+def get_user_from_token(token: str, role_required: str = None):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if role_required and payload.get("role") != role_required:
+        raise HTTPException(status_code=403, detail=f"Access denied for role: {payload.get('role')}")
+
+    return payload
+
+# -------------------- قائمة الأطباء --------------------
+def get_all_doctors():
+    doctors = list(doctors_collection.find({}, {"first_name": 1, "last_name": 1, "specialty": 1}))
     result = []
-    for doctor in doctors:
+    for d in doctors:
+        full_name = f"{d.get('first_name', '-')}"
+        if d.get("last_name"):
+            full_name += f" {d['last_name']}"
         result.append({
-            "id": doctor.id,
-            "name": doctor.name,
-            "specialty": doctor.specialty
+            "id": str(d["_id"]),
+            "name": full_name,
+            "specialty": d.get("specialty", "")
         })
-    return {"doctors": result}
+    return result
 
-# ------------------------
-# 1️⃣ حجز موعد جديد
-# ------------------------
-def book_appointment(db: Session, user: Users, doctor_id: int, date_time: datetime, reason: str = None):
-    # التحقق من وجود الدكتور
-    doctor = db.query(Doctors).filter(Doctors.id == doctor_id).first()
+# -------------------- حجز موعد --------------------
+def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: str = None):
+    payload = get_user_from_token(token, role_required="patient")
+    patient_id = payload.get("id")  # <<< استخدم الـ _id من التوكن
+    patient = patients_collection.find_one({"_id": ObjectId(patient_id)})
+    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
 
-    # لا يمكن حجز موعد في الماضي
     now = datetime.now()
     if date_time <= now:
         raise HTTPException(status_code=400, detail="Cannot book an appointment in the past")
-
-    # التحقق من ساعات العمل 10:00 - 16:00
     if date_time.time() < time(10, 0) or date_time.time() > time(16, 0):
         raise HTTPException(status_code=400, detail="Appointment must be within working hours (10:00 - 16:00)")
-
-    # التحقق من أيام العمل Sunday-Thursday
-    if date_time.weekday() > 4:  # 0=Monday ... 6=Sunday
-        raise HTTPException(status_code=400, detail="Appointments are only allowed from Sunday to Thursday")
-
-    # التحقق من دقائق الموعد (00 أو 30 فقط)
+    if date_time.weekday() > 4:
+        raise HTTPException(status_code=400, detail="Appointments allowed only Sunday-Thursday")
     if date_time.minute not in (0, 30):
         raise HTTPException(status_code=400, detail="Appointments must start at 00 or 30 minutes")
 
-    # التحقق من التعارض مع مواعيد أخرى
-    conflict = db.query(Appointment).filter(
-        Appointment.doctor_id == doctor_id,
-        Appointment.date_time == date_time,
-        Appointment.status != "Cancelled"
-    ).first()
+    # تحقق من وجود تضارب
+    conflict = appointments_collection.find_one({
+        "doctor_id": doctor_id,
+        "status": {"$ne": "Cancelled"},
+        "date_time": date_time
+    })
     if conflict:
-        raise HTTPException(status_code=400, detail="Doctor already has an appointment at this time")
+        raise HTTPException(status_code=400, detail="Doctor has another appointment at this time")
 
-    # إنشاء الموعد
-    new_app = Appointment(
-        user_id=user.id,
-        doctor_id=doctor_id,
-        date_time=date_time,
-        reason=reason,
-        status="Scheduled"
-    )
-    db.add(new_app)
-    db.commit()
-    db.refresh(new_app)
-
+    new_app = {
+        "patient_id": patient_id,
+        "doctor_id": doctor_id,
+        "date_time": date_time,
+        "reason": reason,
+        "status": "Pending"
+    }
+    result = appointments_collection.insert_one(new_app)
+    new_app["appointment_id"] = str(result.inserted_id)
     return new_app
 
-# ------------------------
-# 2️⃣ إلغاء موعد
-# ------------------------
-def cancel_appointment(db: Session, user: Users, appointment_id: int):
-    appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+# -------------------- إلغاء موعد --------------------
+def cancel_appointment(token: str, appointment_id: str):
+    payload = get_user_from_token(token, role_required="patient")
+    patient_id = payload.get("id")
+
+    appointment = appointments_collection.find_one({"_id": ObjectId(appointment_id)})
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
-
-    # التحقق من ملكية الموعد
-    if appointment.user_id != user.id:
-        raise HTTPException(status_code=403, detail="You are not allowed to cancel this appointment")
-
-    # التحقق من حالة الموعد
-    if appointment.status == "Cancelled":
+    if appointment["patient_id"] != patient_id:
+        raise HTTPException(status_code=403, detail="Not allowed to cancel this appointment")
+    if appointment["status"] == "Cancelled":
         raise HTTPException(status_code=400, detail="Appointment already cancelled")
-
-    # لا يمكن إلغاء موعد قديم
-    if appointment.date_time < datetime.now():
+    if appointment["date_time"] < datetime.now():
         raise HTTPException(status_code=400, detail="Cannot cancel a past appointment")
 
-    appointment.status = "Cancelled"
-    db.commit()
-    db.refresh(appointment)
+    appointments_collection.update_one({"_id": ObjectId(appointment_id)}, {"$set": {"status": "Cancelled"}})
+    return {"message": "Appointment cancelled successfully", "appointment_id": appointment_id}
 
-    return {"message": "Appointment cancelled successfully", "appointment_id": appointment.id}
+# -------------------- مواعيد المريض --------------------
+def get_patient_appointments(token: str) -> List[AppointmentResponse]:
+    payload = get_user_from_token(token, role_required="patient")
+    patient_id = payload.get("id")
 
-# ------------------------
-# 3️⃣ عرض كل مواعيد المريض
-# ------------------------
-def get_user_appointments(db: Session, user: Users):
-    appointments = db.query(Appointment).filter(Appointment.user_id == user.id).all()
-    if not appointments:
-        return {"appointments": []}
-
+    appointments = list(appointments_collection.find({"patient_id": patient_id}))
     result = []
     for app in appointments:
-        doctor = db.query(Doctors).filter(Doctors.id == app.doctor_id).first()
-        doctor_name = doctor.name if doctor and doctor.name else "Unknown"
+        doctor = doctors_collection.find_one({"_id": ObjectId(app["doctor_id"])})
+        status_text = {
+            "Pending": "Waiting for doctor's approval",
+            "Confirmed": "Appointment confirmed",
+            "Rejected": "Appointment rejected",
+            "Cancelled": "Appointment cancelled"
+        }.get(app["status"], app["status"])
+        result.append(AppointmentResponse(
+            appointment_id=str(app["_id"]),
+            doctor_name=f"{doctor.get('first_name','')} {doctor.get('last_name','')}" if doctor else "Unknown",
+            date_time=app["date_time"].strftime("%Y-%m-%d %H:%M"),
+            status=status_text,
+            reason=app.get("reason")
+        ))
+    return result
 
-        result.append({
-            "appointment_id": app.id,
-            "doctor_name": doctor_name,
-            "date_time": app.date_time.strftime("%Y-%m-%d %H:%M") if app.date_time else "-",
-            "status": app.status if app.status else "-",
-            "reason": app.reason if app.reason else "-"
-        })
+# -------------------- مواعيد الطبيب --------------------
+def get_doctor_appointments(token: str) -> List[AppointmentResponse]:
+    payload = get_user_from_token(token, role_required="doctor")
+    doctor_id = payload.get("id")
 
-    return {"appointments": result}
-
-# ------------------------
-# 4️⃣ دالة لاستخراج id الدكتور من التوكن
-# ------------------------
-def get_doctor_id_from_token(token: str):
-    payload = jwt.decode(token, "SECRET_KEY", algorithms=["HS256"])
-    return payload.get("sub")  # id الدكتور
-
-# ------------------------
-# 5️⃣ عرض مواعيد الدكتور الخاصة به
-# ------------------------
-@router.get("/appointments/doctor")
-def get_doctor_appointments(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    doctor_id = get_doctor_id_from_token(token)
-    appointments = db.query(Appointment).filter(Appointment.doctor_id == doctor_id).all()
-
+    appointments = list(appointments_collection.find({"doctor_id": doctor_id}))
     result = []
     for app in appointments:
-        patient = db.query(Users).filter(Users.id == app.user_id).first()
-        result.append({
-            "appointment_id": app.id,
-            "patient_name": patient.name if patient else "Unknown",
-            "date_time": app.date_time.isoformat(),
-            "status": app.status,
-            "reason": app.reason
-        })
-    return {"appointments": result}
+        patient = patients_collection.find_one({"_id": ObjectId(app["patient_id"])})
+        result.append(AppointmentResponse(
+            appointment_id=str(app["_id"]),
+            patient_name=f"{patient.get('first_name','')} {patient.get('last_name','')}" if patient else "Unknown",
+            date_time=app["date_time"].strftime("%Y-%m-%d %H:%M"),
+            status=app["status"],
+            reason=app.get("reason")
+        ))
+    return result
+
+# -------------------- موافقة/رفض الطبيب --------------------
+def approve_appointment(token: str, appointment_id: str, approve: bool):
+    payload = get_user_from_token(token, role_required="doctor")
+    doctor_id = payload.get("id")
+
+    appointment = appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if appointment["doctor_id"] != doctor_id:
+        raise HTTPException(status_code=403, detail="Not allowed to approve this appointment")
+    if appointment["status"] != "Pending":
+        raise HTTPException(status_code=400, detail="Appointment already processed")
+
+    new_status = "Confirmed" if approve else "Rejected"
+    appointments_collection.update_one({"_id": ObjectId(appointment_id)}, {"$set": {"status": new_status}})
+    return {"message": "Appointment updated successfully",
+            "appointment_id": appointment_id,
+            "new_status": new_status}
+
+# -------------------- الأوقات المتاحة للطبيب --------------------
+def get_available_slots(doctor_id: str, date: str):
+    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
+    start_time = time(10, 0)
+    end_time = time(16, 0)
+    slot_duration = timedelta(minutes=30)
+
+    current = datetime.strptime(date, "%Y-%m-%d").replace(hour=start_time.hour, minute=start_time.minute)
+    end_datetime = datetime.strptime(date, "%Y-%m-%d").replace(hour=end_time.hour, minute=end_time.minute)
+
+    existing_appointments = list(appointments_collection.find({
+        "doctor_id": doctor_id,
+        "status": {"$ne": "Cancelled"},
+        "date_time": {"$gte": current, "$lt": end_datetime + slot_duration}
+    }))
+    booked_times = [app["date_time"] for app in existing_appointments]
+
+    available_slots = []
+    while current <= end_datetime:
+        if all(current != bt for bt in booked_times):
+            available_slots.append(current.strftime("%H:%M"))
+        current += slot_duration
+    return available_slots

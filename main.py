@@ -3,7 +3,7 @@ from database import *  # لو بدك تستخدم الاتصال بـ PostgreSQ
 from routers import patient_router 
 from routers import dector_router 
 from routers import appointment_router 
-
+from routers import admin_router
 app = FastAPI()
 
 @app.get("/")
@@ -25,5 +25,5 @@ app.include_router(dector_router.router)
 app.include_router(appointment_router.router)
 
 
-
+app.include_router(admin_router.admin_router)  # ✅
 # uvicorn main:app --reload

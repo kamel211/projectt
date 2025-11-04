@@ -1,16 +1,31 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
-from sqlalchemy.orm import relationship
-from database import Base
-from appointment_model import Appointment
+from pydantic import BaseModel, EmailStr
+from typing import Optional
+from datetime import datetime
 
-class Doctors(Base):
-    __tablename__ = "doctors"  
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    specialty = Column(String)
-    email = Column(String, unique=True, nullable=False)
-    phone = Column(String)
-    hashed_password = Column(String, nullable=False)  # لتسجيل الدخول
+# ✅ موديل إنشاء حساب جديد للدكتور
+class CreateDoctorModel(BaseModel):
+    username: str
+    email: EmailStr
+    first_name: str
+    last_name: str
+    password: str
+    phone_number: Optional[str]
+    role: str = "doctor"
+    cv_url: Optional[str] = None  # رابط السيرة الذاتية (PDF / صورة)
+    is_approved: bool = False     # يتم تفعيله بعد موافقة الأدمن
+    created_at: datetime = datetime.utcnow()
 
-    # العلاقة مع المواعيد
-    appointments = relationship("Appointment", back_populates="doctor")
+
+# ✅ موديل تسجيل الدخول
+class LoginDoctorModel(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: str
+
+
+# ✅ موديل تحديث الملف الشخصي
+class UpdateDoctorModel(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[EmailStr] = None

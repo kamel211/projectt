@@ -151,22 +151,24 @@ async def login_patient(request_data: LoginPatientRequest, request: Request):
 # ================== المريض الحالي ==================
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/patients/login")
 
+
 def get_current_patient(token: str = Depends(oauth2_scheme)):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid token: no email found")
+        
+        patient = patients_collection.find_one({"email": email})
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        
+        # تحويل ObjectId إلى string
+        patient["_id"] = str(patient["_id"])
+        return patient
+
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    if payload.get("role") != "patient":
-        raise HTTPException(status_code=403, detail="Access denied for non-patient")
-    
-    user = patients_collection.find_one({"_id": ObjectId(payload.get("id"))})
-    if not user:
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    user["_id"] = str(user["_id"])
-    return {"payload": payload, "user": user}
-
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # ================== تسجيل الخروج ==================
 def logout_patient(token: str):

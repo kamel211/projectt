@@ -13,17 +13,15 @@ from database import doctors_collection, appointments_collection, patients_colle
 
 SECRET_KEY = "mysecretkey"
 
-# -------------------- نموذج المواعيد --------------------
+
 class AppointmentResponse(BaseModel):
     appointment_id: str
-    doctor_name: str = None
-    patient_name: str = None
+    doctor_id: str
+    patient_id: str
     date_time: str
-    status: str
     reason: str = None
-
-
-# دالة مساعدة لتحويل ObjectId إلى string
+    status: str
+# -------------------- دالة مساعدة لتحويل ObjectId إلى string --------------------
 def convert_objectid(doc):
     if not doc:
         return None
@@ -33,34 +31,59 @@ def convert_objectid(doc):
             doc[key] = str(value)
     return doc
 
-def book_appointment(patient_email: str, doctor_id: str, date_time: datetime, reason: str = ""):
-    # التأكد أن الطبيب موجود
+# -------------------- حجز موعد --------------------
+def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: str = ""):
+    # التحقق من التوكن
+    payload = get_user_from_token(token, role_required="patient")
+    patient_id = payload.get("id")
+
+    # التحقق من الطبيب والمريض
     doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
-    
-    # البحث عن المريض باستخدام البريد
-    patient = patients_collection.find_one({"email": patient_email})
+
+    patient = patients_collection.find_one({"_id": ObjectId(patient_id)})
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
-    
-    # إنشاء الموعد
-    appointment = {
+
+    now = datetime.now()
+    if date_time <= now:
+        raise HTTPException(status_code=400, detail="Cannot book past appointments")
+
+    # التحقق من ساعات العمل والدقائق
+    if date_time.time() < time(10, 0) or date_time.time() > time(16, 0):
+        raise HTTPException(status_code=400, detail="Appointment must be within working hours (10:00 - 16:00)")
+    if date_time.minute not in (0, 30):
+        raise HTTPException(status_code=400, detail="Appointments must start at 00 or 30 minutes")
+
+    # التحقق من تضارب المواعيد
+    conflict = appointments_collection.find_one({
         "doctor_id": ObjectId(doctor_id),
-        "patient_id": patient["_id"],
+        "status": {"$ne": "Cancelled"},
+        "date_time": date_time
+    })
+    if conflict:
+        raise HTTPException(status_code=400, detail="Doctor has another appointment at this time")
+
+    # إنشاء الموعد
+    new_app = {
+        "patient_id": ObjectId(patient_id),
+        "doctor_id": ObjectId(doctor_id),
         "date_time": date_time,
         "reason": reason,
-        "status": "pending"
+        "status": "Pending"
     }
-    
-    result = appointments_collection.insert_one(appointment)
-    appointment["_id"] = str(result.inserted_id)
-    appointment["doctor_id"] = str(appointment["doctor_id"])
-    appointment["patient_id"] = str(appointment["patient_id"])
-    
-    return appointment
 
-# -------------------- التحقق من التوكن --------------------
+    result = appointments_collection.insert_one(new_app)
+
+    # تحويل ObjectId إلى str قبل الإرجاع
+    new_app["appointment_id"] = str(result.inserted_id)
+    new_app["patient_id"] = str(new_app["patient_id"])
+    new_app["doctor_id"] = str(new_app["doctor_id"])
+
+    return new_app
+
+
 def get_user_from_token(token: str, role_required: str = None):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])

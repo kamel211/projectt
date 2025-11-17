@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from database import *  # لو بدك تستخدم الاتصال بـ PostgreSQL و MongoDB
 from routers import patient_router 
 from routers import dector_router 
+from fastapi.staticfiles import StaticFiles
 from routers import appointment_router 
 from routers import admin_router
 app = FastAPI()
@@ -15,6 +16,8 @@ def read_root():
 app.include_router(patient_router.router)
 
 
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 # dector

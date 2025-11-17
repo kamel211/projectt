@@ -22,10 +22,14 @@ class LoginDoctorModel(BaseModel):
     email: Optional[EmailStr] = None
     password: str
 
-
-# ✅ موديل تحديث الملف الشخصي
 class UpdateDoctorModel(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone_number: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
+    bio: Optional[str] = None
+    location: Optional[str] = None
+    gender: Optional[str] = None
+    specialization: Optional[str] = None
+    years_of_experience: Optional[int] = None
+    profile_image_url: Optional[str] = None   # ← الحل السحري

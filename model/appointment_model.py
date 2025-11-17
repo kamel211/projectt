@@ -1,19 +1,14 @@
-from sqlalchemy import Column, Integer, DateTime, ForeignKey, String
-from sqlalchemy.orm import relationship
-from database import Base
-from model.patient_model import Users
-from model.doctor_model import Doctors
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
 
-class Appointment(Base):
-    __tablename__ = "appointments"
+class Appointment(BaseModel):
+    appointment_id: Optional[str] = None      # بديل id
+    user_id: str                               # بديل ForeignKey(patient)
+    doctor_id: str                             # بديل ForeignKey(doctor)
+    date_time: datetime                        # نفس الشي
+    status: str = "Scheduled"                  # نفس default
+    reason: Optional[str] = None               # خيار إضافي (إذا بدك)
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("patient.id"), nullable=False)
-    doctor_id = Column(Integer, ForeignKey("doctors.id"), nullable=False)
-    date_time = Column(DateTime, nullable=False)
-
-    status = Column(String, default="Scheduled", nullable=False)
-
-    patient = relationship("Users", back_populates="appointments")
-
-    doctor = relationship("Doctors", back_populates="appointments")
+    class Config:
+        orm_mode = True

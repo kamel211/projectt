@@ -17,6 +17,7 @@ class AdminCreateModel(BaseModel):
 class AdminLoginModel(BaseModel):
     email: EmailStr
     password: str
+ # python -m venv venv
 
 # تحقق إذا فيه Admin
 def is_admin_exists() -> bool:

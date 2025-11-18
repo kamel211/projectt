@@ -32,4 +32,4 @@ class UpdateDoctorModel(BaseModel):
     gender: Optional[str] = None
     specialization: Optional[str] = None
     years_of_experience: Optional[int] = None
-    profile_image_url: Optional[str] = None   # ← الحل السحري
+    profile_image_url: Optional[str] = None  

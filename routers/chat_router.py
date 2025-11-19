@@ -3,9 +3,12 @@ from fastapi.responses import JSONResponse
 from Controller.chat_controller import handle_file_upload, verify_token, get_chats, fetch_messages, send_text_message
 from pydantic import BaseModel
 
+
+
 router = APIRouter(prefix="/chat")
 
 # ===== Pydantic model للرسالة =====
+
 class MessagePayload(BaseModel):
     receiver_id: str
     message: str

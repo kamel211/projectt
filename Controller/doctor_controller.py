@@ -249,3 +249,6 @@ def update_doctor(update_data: UpdateDoctorModel, current_user, profile_image_ur
     updated_doctor = mongo_db["doctors"].find_one({"_id": ObjectId(current_user["_id"])})
     updated_doctor["_id"] = str(updated_doctor["_id"])
     return updated_doctor
+
+
+

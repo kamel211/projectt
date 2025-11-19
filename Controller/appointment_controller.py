@@ -80,7 +80,6 @@ async def send_email_async(recipient: str, subject: str, content: str):
     except Exception as e:
         print(f"Error sending email to {recipient}: {e}")
 
-
 # -------------------- حجز موعد --------------------
 def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: str = None):
     payload = get_user_from_token(token, role_required="patient")
@@ -103,6 +102,16 @@ def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: st
     if date_time.minute not in (0, 30):
         raise HTTPException(status_code=400, detail="Appointments must start at 00 or 30 minutes")
 
+    # ❌ تحقق إذا المريض لديه موعد بالفعل في نفس الوقت
+    existing = appointments_collection.find_one({
+        "patient_id": patient_id,
+        "status": {"$ne": "Cancelled"},
+        "date_time": date_time
+    })
+    if existing:
+        raise HTTPException(status_code=400, detail="You already have an appointment at this time")
+
+    # ❌ تحقق إذا الطبيب لديه موعد في نفس الوقت
     conflict = appointments_collection.find_one({
         "doctor_id": doctor_id,
         "status": {"$ne": "Cancelled"},
@@ -341,10 +350,7 @@ def complete_appointment(token: str, appointment_id: str):
 
 
 
-
-
-
 async def get_token(authorization: str = Header(...)):
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid token")
-    return authorization[7:]  # 
+    return authorization[7:]

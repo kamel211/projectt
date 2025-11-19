@@ -1,3 +1,4 @@
+# patient_controller.py
 from fastapi import HTTPException, Depends, Request, status
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
@@ -62,6 +63,21 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
 
+# ======= truncate password to 72 bytes =======
+def truncate_password(password: str) -> str:
+    """
+    تقص الباسورد إلى أول 72 بايت بشكل آمن لباسوردات UTF-8.
+    """
+    # loop عبر الأحرف وحساب الطول بالبايت
+    truncated = ""
+    total_bytes = 0
+    for char in password:
+        char_bytes = char.encode("utf-8")
+        if total_bytes + len(char_bytes) > 72:
+            break
+        truncated += char
+        total_bytes += len(char_bytes)
+    return truncated
 
 # ================== دوال JWT ==================
 def create_access_token(username: str, patient_id: str, expires_delta: Optional[timedelta] = None):
@@ -86,8 +102,7 @@ def verify_token(token: str):
 
 # ================== تسجيل مريض جديد ==================
 def register_patient(request: CreatePatientRequest):
-    if len(request.password.encode('utf-8')) > 72:
-        raise HTTPException(status_code=400, detail="Password too long, max 72 bytes")
+# لم يعد هناك حاجة للتحقق من طول الباسورد
 
     existing_patient = patients_collection.find_one({
         "$or": [{"username": request.username}, {"email": request.email}]
@@ -98,7 +113,7 @@ def register_patient(request: CreatePatientRequest):
         else:
             raise HTTPException(status_code=400, detail="Email already exists")
 
-    hashed_password = bcrypt_context.hash(request.password)
+    hashed_password = bcrypt_context.hash(truncate_password(request.password))
     new_patient = {
         "email": request.email,
         "username": request.username,
@@ -117,25 +132,62 @@ def register_patient(request: CreatePatientRequest):
 
 
 # ================== تسجيل الدخول ==================
+from fastapi import HTTPException, Request
+from passlib.context import CryptContext
+
+bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 async def login_patient(request_data: LoginPatientRequest, request: Request):
+    """
+    Login a patient using username or email and password.
+    Returns an access token and patient info if successful.
+    """
+
+    # 1️⃣ Build the query based on provided input
     query = {}
     if request_data.username:
         query["username"] = request_data.username
     elif request_data.email:
         query["email"] = request_data.email
     else:
-        raise HTTPException(status_code=400, detail="يرجى إدخال اسم المستخدم أو البريد الإلكتروني")
+        # Case: Neither username nor email is provided
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide either username or email."
+        )
 
+    # 2️⃣ Find patient in the database
     patient = patients_collection.find_one(query)
-    if not patient or not bcrypt_context.verify(request_data.password, patient["hashed_password"]):
-        raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
 
+    # 3️⃣ Check if patient exists and password is correct
+    if not patient:
+        # Case: No patient found with the given username/email
+        raise HTTPException(
+            status_code=401,
+            detail="Username or password is incorrect."
+        )
+
+    if not bcrypt_context.verify(request_data.password, patient["hashed_password"]):
+        # Case: Password is incorrect
+        raise HTTPException(
+            status_code=401,
+            detail="Username or password is incorrect."
+        )
+
+    # 4️⃣ Check if account is active
     if not patient.get("is_active", True):
-        raise HTTPException(status_code=400, detail="الحساب غير مفعل. يرجى التواصل مع الإدارة.")
+        # Case: Account exists but is inactive
+        raise HTTPException(
+            status_code=403,
+            detail="Account is inactive. Please contact administration."
+        )
 
+    # 5️⃣ If everything is fine, create an access token
     token = create_access_token(patient["username"], str(patient["_id"]))
+
+    # 6️⃣ Return success response
     return {
-        "message": f"مرحباً بعودتك {patient['first_name']}!",
+        "message": f"Welcome back, {patient['first_name']}!",
         "access_token": token,
         "token_type": "bearer",
         "patient_id": str(patient["_id"]),
@@ -184,7 +236,7 @@ def change_password(request_data: ChangePasswordRequest, current_patient):
     if bcrypt_context.verify(request_data.new_password, current_patient["hashed_password"]):
         raise HTTPException(status_code=400, detail="كلمة المرور الجديدة يجب أن تكون مختلفة عن القديمة")
 
-    hashed_new_password = bcrypt_context.hash(request_data.new_password)
+    hashed_new_password = bcrypt_context.hash(truncate_password(request_data.new_password))
     patients_collection.update_one(
         {"_id": ObjectId(current_patient["_id"])},
         {"$set": {"hashed_password": hashed_new_password}}
@@ -250,6 +302,44 @@ def get_profile_for_current_patient(current_patient: dict):
         "phone_number": current_patient.get("phone_number"),
         "username": current_patient.get("username"),
     }
+
+
+
+
+
+
+
+# ================== استدعاء مجموعة الدكاترة ==================
+doctors_collection = mongo_db["doctors"]
+
+# ================== جلب كل معلومات دكتور ==================
+def get_doctor_info(doctor_id: str):
+    """
+    ترجع كل بيانات الدكتور بناءً على الID.
+    """
+
+    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
+    # تحويل ObjectId إلى string
+    doctor["_id"] = str(doctor["_id"])
+
+    # إرجاع كل البيانات للمريض
+    return doctor
+
+# ================== جلب كل الدكاترة ==================
+def get_all_doctors_info():
+    """
+    ترجع قائمة بكل الدكاترة.
+    """
+    doctors_cursor = doctors_collection.find()
+    doctors_list = []
+    for doc in doctors_cursor:
+        doc["_id"] = str(doc["_id"])
+        doctors_list.append(doc)
+    return doctors_list
+
 
 ##
 ##

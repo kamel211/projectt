@@ -4,6 +4,8 @@ from Controller.patient_controller import (
     LoginPatientRequest,
     ChangePasswordRequest,
     UpdatePatientRequest,
+    get_all_doctors_info,
+    get_doctor_info,
     register_patient,
     login_patient,
     logout_patient,
@@ -64,3 +66,25 @@ def update_patient_profile_endpoint(
     current_patient: dict = Depends(get_current_patient)
 ):
     return update_patient_profile(update_data, current_patient)
+
+
+
+
+
+
+# ================== عرض كل الدكاترة ==================
+@router.get("/doctors")
+def list_doctors(current_patient: dict = Depends(get_current_patient)):
+    """
+    يعرض كل الدكاترة للعميل الحالي
+    """
+    return get_all_doctors_info()
+
+
+# ================== عرض دكتور محدد ==================
+@router.get("/doctors/{doctor_id}")
+def doctor_details(doctor_id: str, current_patient: dict = Depends(get_current_patient)):
+    """
+    يعرض كل بيانات الدكتور للعميل الحالي
+    """
+    return get_doctor_info(doctor_id)

@@ -1,3 +1,4 @@
+from Controller import patient_controller
 from fastapi import APIRouter, Depends, Header, Request
 from Controller.patient_controller import (
     CreatePatientRequest,
@@ -11,15 +12,17 @@ from Controller.patient_controller import (
     logout_patient,
     change_password,
     update_patient_profile,
-    get_current_patient
+    get_current_patient,
 )
+from model.otp_model import OTPRequest, OTPVerifyRequest
+from Controller.patient_controller import patient_controller
 
 router = APIRouter(prefix="/patients", tags=["Patients Auth"])
 
 # تسجيل مريض جديد
 @router.post("/register")
-def register(request: CreatePatientRequest):
-    return register_patient(request)
+async def register(request: CreatePatientRequest):
+    return await register_patient(request)
 
 
 # تسجيل دخول المريض
@@ -88,3 +91,11 @@ def doctor_details(doctor_id: str, current_patient: dict = Depends(get_current_p
     يعرض كل بيانات الدكتور للعميل الحالي
     """
     return get_doctor_info(doctor_id)
+
+
+@router.post("/verify_otp")
+async def verify_otp(request: OTPVerifyRequest):
+    return await patient_controller.verify_login_otp(request)
+@router.post("/send_otp")
+async def send_otp(request: OTPRequest):
+    return await patient_controller.send_otp_endpoint(request)

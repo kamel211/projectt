@@ -7,12 +7,12 @@ from Controller.patient_controller import (
     UpdatePatientRequest,
     get_all_doctors_info,
     get_doctor_info,
-    register_patient,
     login_patient,
     logout_patient,
-    change_password,
     update_patient_profile,
     get_current_patient,
+    confirm_registration
+,register_patient
 )
 from model.otp_model import OTPRequest, OTPVerifyRequest
 from Controller.patient_controller import patient_controller
@@ -20,9 +20,22 @@ from Controller.patient_controller import patient_controller
 router = APIRouter(prefix="/patients", tags=["Patients Auth"])
 
 # تسجيل مريض جديد
+# تسجيل مريض جديد (يحفظ البيانات مؤقتًا ويرسل OTP)
 @router.post("/register")
 async def register(request: CreatePatientRequest):
     return await register_patient(request)
+
+
+
+# تأكيد OTP والتسجيل النهائي
+@router.post("/confirm_registration")
+async def confirm_registration_endpoint(email: str, otp: str):
+    """
+    يتحقق من OTP للمريض المسجل مؤقتًا، وإذا صحيح يتم إنشاء الحساب النهائي.
+    """
+    return await confirm_registration(email, otp)
+
+
 
 
 # تسجيل دخول المريض
@@ -35,22 +48,24 @@ async def login(request: LoginPatientRequest, req: Request):
 @router.post("/logout")
 def logout(Authorization: str = Header(...)):
     token = Authorization.split(" ")[1]
-    return logout_patient(token)
+    return   logout_patient(token)
 
 
 # تغيير كلمة مرور المريض
-@router.put("/change-password")
-def change_patient_password(
-    request_data: ChangePasswordRequest,
-    current_patient: dict = Depends(get_current_patient)
-):
-    return change_password(request_data, current_patient)
+# ================== تغيير كلمة المرور بعد OTP ==================
+@router.put("/change-password-after-otp")
+async def change_password_after_otp_endpoint(request_data: ChangePasswordRequest):
+    """
+    تغيير كلمة مرور المريض بعد التحقق من OTP بدون الحاجة إلى JWT.
+    """
+    return await patient_controller.change_password_after_otp(request_data)
+
 
 
 # بيانات المريض الحالي
 @router.get("/me")
 def get_current_patient_info(current_patient: dict = Depends(get_current_patient)):
-    return {
+    return  {
         "id": str(current_patient["_id"]),
         "username": current_patient["username"],
         "email": current_patient["email"],
@@ -64,11 +79,11 @@ def get_current_patient_info(current_patient: dict = Depends(get_current_patient
 
 # تحديث بيانات المريض الحالي
 @router.put("/me_update")
-def update_patient_profile_endpoint(
+async def update_patient_profile_endpoint(
     update_data: UpdatePatientRequest,
     current_patient: dict = Depends(get_current_patient)
 ):
-    return update_patient_profile(update_data, current_patient)
+    return await update_patient_profile(update_data, current_patient)
 
 
 
@@ -77,20 +92,20 @@ def update_patient_profile_endpoint(
 
 # ================== عرض كل الدكاترة ==================
 @router.get("/doctors")
-def list_doctors(current_patient: dict = Depends(get_current_patient)):
+async def list_doctors(current_patient: dict = Depends(get_current_patient)):
     """
     يعرض كل الدكاترة للعميل الحالي
     """
-    return get_all_doctors_info()
+    return  await get_all_doctors_info()
 
 
 # ================== عرض دكتور محدد ==================
 @router.get("/doctors/{doctor_id}")
-def doctor_details(doctor_id: str, current_patient: dict = Depends(get_current_patient)):
+async def doctor_details(doctor_id: str, current_patient: dict = Depends(get_current_patient)):
     """
     يعرض كل بيانات الدكتور للعميل الحالي
     """
-    return get_doctor_info(doctor_id)
+    return await get_doctor_info(doctor_id)
 
 
 @router.post("/verify_otp")
@@ -99,3 +114,5 @@ async def verify_otp(request: OTPVerifyRequest):
 @router.post("/send_otp")
 async def send_otp(request: OTPRequest):
     return await patient_controller.send_otp_endpoint(request)
+
+

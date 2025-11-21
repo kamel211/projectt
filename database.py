@@ -17,6 +17,8 @@ try:
     appointments_collection = mongo_db["appointments"]
     patients_collection = mongo_db["patients"]
     otp_collection = mongo_db["otp_storage"]
+    # مؤقتاً
+    temp_patients_collection = mongo_db["temp_patients"]
 
     print("✅ Connected to MongoDB successfully!")
 

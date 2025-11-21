@@ -9,7 +9,8 @@ from database import appointments_collection ,patients_collection,doctors_collec
 import aiosmtplib
 from email.mime.text import MIMEText
 import asyncio
-
+from jose import jwt
+from datetime import datetime
 # -------------------- إعداد SMTP للإشعارات --------------------
 SMTP_SERVER = "smtp-relay.brevo.com"
 SMTP_PORT = 587
@@ -25,8 +26,20 @@ class AppointmentResponse(BaseModel):
     date_time: str
     status: str
     reason: str = None
-
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- دوال مساعدة --------------------
+#
+#
+#
+#
+#
+#----------------------------------------
+#
 def convert_objectid(doc):
     if not doc:
         return None
@@ -36,9 +49,15 @@ def convert_objectid(doc):
             doc[key] = str(value)
     return doc
 
+#
+#----------------------------------------
+#
+#
+#----------------------------------------
+#
+
+
 def get_user_from_token(token: str, role_required: str = None):
-    # هذه الدالة تحتاج أن يكون لديك JWT
-    from jose import jwt
     SECRET_KEY = "mysecretkey"
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
@@ -49,8 +68,22 @@ def get_user_from_token(token: str, role_required: str = None):
         raise HTTPException(status_code=403, detail=f"Access denied for role: {payload.get('role')}")
     return payload
 
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- إرسال الإيميل --------------------
-def notify_patient_email(patient_email: str, doctor_name: str, date_time: str, approved: bool):
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+
+async def notify_patient_email(patient_email: str, doctor_name: str, date_time: str, approved: bool):
     subject = f"تحديث حول موعدك مع الدكتور {doctor_name}"
     status_text = "تمت الموافقة على موعدك " if approved else "تم رفض موعدك "
     content = (
@@ -61,6 +94,7 @@ def notify_patient_email(patient_email: str, doctor_name: str, date_time: str, a
         f"مع تحيات فريقنا."
     )
     asyncio.create_task(send_email_async(patient_email, subject, content))
+
 
 async def send_email_async(recipient: str, subject: str, content: str):
     message = MIMEText(content, "plain", "utf-8")
@@ -80,12 +114,25 @@ async def send_email_async(recipient: str, subject: str, content: str):
     except Exception as e:
         print(f"Error sending email to {recipient}: {e}")
 
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- حجز موعد --------------------
-def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: str = None):
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+async def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: str = None):
     payload = get_user_from_token(token, role_required="patient")
     patient_id = payload.get("id")
-    patient = patients_collection.find_one({"_id": ObjectId(patient_id)})
-    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    patient =await patients_collection.find_one({"_id": ObjectId(patient_id)})
+    doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
 
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -103,7 +150,7 @@ def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: st
         raise HTTPException(status_code=400, detail="Appointments must start at 00 or 30 minutes")
 
     # ❌ تحقق إذا المريض لديه موعد بالفعل في نفس الوقت
-    existing = appointments_collection.find_one({
+    existing = await appointments_collection.find_one({
         "patient_id": patient_id,
         "status": {"$ne": "Cancelled"},
         "date_time": date_time
@@ -112,7 +159,7 @@ def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: st
         raise HTTPException(status_code=400, detail="You already have an appointment at this time")
 
     # ❌ تحقق إذا الطبيب لديه موعد في نفس الوقت
-    conflict = appointments_collection.find_one({
+    conflict = await appointments_collection.find_one({
         "doctor_id": doctor_id,
         "status": {"$ne": "Cancelled"},
         "date_time": date_time
@@ -128,7 +175,7 @@ def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: st
         "reason": reason,
         "status": "Pending"
     }
-    result = appointments_collection.insert_one(new_app)
+    result =await appointments_collection.insert_one(new_app)
     
     # تحويل كل ObjectId إلى string قبل الإرجاع
     response = {
@@ -141,14 +188,26 @@ def book_appointment(token: str, doctor_id: str, date_time: datetime, reason: st
     }
     return response
 
-
+#
+#----------------------------------------
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#----------------------------------------
+#
 async def approve_appointment(token: str, appointment_id: str, approve: bool):
     # التحقق من هوية الدكتور
     payload = get_user_from_token(token, role_required="doctor")
     doctor_id = payload.get("id")
 
     # جلب الموعد
-    appointment = appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+    appointment = await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
@@ -162,7 +221,7 @@ async def approve_appointment(token: str, appointment_id: str, approve: bool):
     new_status = "Confirmed" if approve else "Rejected"
 
     # تحديث الموعد في MongoDB
-    appointments_collection.update_one(
+    await appointments_collection.update_one(
         {"_id": ObjectId(appointment_id)},
         {"$set": {"status": new_status}}
     )
@@ -170,8 +229,8 @@ async def approve_appointment(token: str, appointment_id: str, approve: bool):
     # ------------------------
     #  تجهيز بيانات الإيميل
     # ------------------------
-    patient = patients_collection.find_one({"_id": ObjectId(appointment["patient_id"])})
-    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    patient = await patients_collection.find_one({"_id": ObjectId(appointment["patient_id"])})
+    doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
 
     # معالجة التاريخ String → datetime
     raw_date = appointment["date_time"]
@@ -184,7 +243,7 @@ async def approve_appointment(token: str, appointment_id: str, approve: bool):
 
     # إرسال الإيميل إذا كانت البيانات كاملة
     if patient and doctor:
-       notify_patient_email(
+        await  notify_patient_email(
                 patient_email=patient["email"],
                 doctor_name=f"{doctor.get('first_name', '')} {doctor.get('last_name', '')}",
                 date_time=date_time.strftime("%Y-%m-%d %H:%M"),
@@ -206,14 +265,28 @@ async def approve_appointment(token: str, appointment_id: str, approve: bool):
         "new_status": new_status,
         "display_status": status_display
     }
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- مواعيد المريض --------------------
-def get_patient_appointments(token: str) -> List[AppointmentResponse]:
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+async def get_patient_appointments(token: str) -> List[AppointmentResponse]:
     payload = get_user_from_token(token, role_required="patient")
     patient_id = payload.get("id")
-    appointments = list(appointments_collection.find({"patient_id": patient_id}))
+
+    appointments = await appointments_collection.find({"patient_id": patient_id}).to_list(length=None)
     result = []
     for app in appointments:
-        doctor = doctors_collection.find_one({"_id": ObjectId(app["doctor_id"])})
+        doctor = await doctors_collection.find_one({"_id": ObjectId(app["doctor_id"])})
         
         # تحويل تاريخ ISO string إلى datetime
         date_obj = datetime.fromisoformat(app["date_time"]) if isinstance(app["date_time"], str) else app["date_time"]
@@ -235,17 +308,27 @@ def get_patient_appointments(token: str) -> List[AppointmentResponse]:
     return result
 
 
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- مواعيد الطبيب --------------------
-from datetime import datetime
-
-def get_doctor_appointments(token: str) -> List[AppointmentResponse]:
+#
+#
+#
+#
+#
+#----------------------------------------
+async def get_doctor_appointments(token: str) -> List[AppointmentResponse]:
     payload = get_user_from_token(token, role_required="doctor")
     doctor_id = payload.get("id")
-    appointments = list(appointments_collection.find({"doctor_id": doctor_id}))
+    appointments = await appointments_collection.find({"doctor_id": doctor_id}).to_list(length=None)  
     result = []
 
     for app in appointments:
-        patient = patients_collection.find_one({"_id": ObjectId(app["patient_id"])})
+        patient =await patients_collection.find_one({"_id": ObjectId(app["patient_id"])})
 
         # التأكد من نوع التاريخ
         date_time_obj = app["date_time"]
@@ -261,10 +344,22 @@ def get_doctor_appointments(token: str) -> List[AppointmentResponse]:
         ))
     return result
 
-
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- الأوقات المتاحة للطبيب --------------------
-def get_available_slots(doctor_id: str, date: str):
-    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+async def get_available_slots(doctor_id: str, date: str):
+    doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
 
@@ -275,11 +370,12 @@ def get_available_slots(doctor_id: str, date: str):
     current = datetime.strptime(date, "%Y-%m-%d").replace(hour=start_time.hour, minute=start_time.minute)
     end_datetime = datetime.strptime(date, "%Y-%m-%d").replace(hour=end_time.hour, minute=end_time.minute)
 
-    existing_appointments = list(appointments_collection.find({
-        "doctor_id": doctor_id,
-        "status": {"$ne": "Cancelled"},
-        "date_time": {"$gte": current, "$lt": end_datetime + slot_duration}
-    }))
+    existing_appointments = await appointments_collection.find({
+    "doctor_id": doctor_id,
+    "status": {"$ne": "Cancelled"},
+    "date_time": {"$gte": current, "$lt": end_datetime + slot_duration}
+        }).to_list(length=None)
+
     booked_times = [app["date_time"] for app in existing_appointments]
 
     available_slots = []
@@ -289,12 +385,24 @@ def get_available_slots(doctor_id: str, date: str):
         current += slot_duration
     return available_slots
 
-
-def cancel_appointment(token: str, appointment_id: str):
+#
+#----------------------------------------
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+async def cancel_appointment(token: str, appointment_id: str):
     payload = get_user_from_token(token, role_required="patient")
     patient_id = payload.get("id")
 
-    appointment = appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+    appointment =await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
@@ -304,33 +412,59 @@ def cancel_appointment(token: str, appointment_id: str):
     if appointment["status"] in ["Cancelled", "Rejected"]:
         raise HTTPException(status_code=400, detail="Appointment already cancelled")
 
-    appointments_collection.update_one(
+    await appointments_collection.update_one(
         {"_id": ObjectId(appointment_id)},
         {"$set": {"status": "Cancelled"}}
     )
 
     return {"message": "Appointment cancelled successfully"}
-def update_expired_appointments():
+
+#
+#----------------------------------------
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+async def update_expired_appointments():
     now = datetime.now()
-    expired = appointments_collection.find({"status": {"$in": ["Confirmed", "Pending"]}})
+    expired = await appointments_collection.find({"status": {"$in": ["Confirmed", "Pending"]}}).to_list(length=None)
     for app in expired:
         app_time = app["date_time"]
         if isinstance(app_time, str):
             app_time = datetime.fromisoformat(app_time)
         if app_time < now:
-            appointments_collection.update_one(
+            await  appointments_collection.update_one(
                 {"_id": app["_id"]},
                 {"$set": {"status": "Cancelled"}}
             )
 
 
-
+#
+#----------------------------------------
+#
+#
+#
+#
 # -------------------- تعليم الموعد كمكتمل --------------------
-def complete_appointment(token: str, appointment_id: str):
+#
+#
+#
+#
+#
+#----------------------------------------
+#
+async def complete_appointment(token: str, appointment_id: str):
     payload = get_user_from_token(token, role_required="doctor")
     doctor_id = payload.get("id")
 
-    appointment = appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+    appointment =await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
@@ -340,7 +474,7 @@ def complete_appointment(token: str, appointment_id: str):
     if appointment["status"] != "Confirmed":
         raise HTTPException(status_code=400, detail="Only confirmed appointments can be completed")
 
-    appointments_collection.update_one(
+    await appointments_collection.update_one(
         {"_id": ObjectId(appointment_id)},
         {"$set": {"status": "Completed", "completed_at": datetime.now()}}
     )
@@ -348,9 +482,22 @@ def complete_appointment(token: str, appointment_id: str):
     return {"message": "Appointment marked as completed", "appointment_id": appointment_id, "new_status": "Completed"}
 
 
-
+#
+#----------------------------------------
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#----------------------------------------
+#
 
 async def get_token(authorization: str = Header(...)):
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid token")
     return authorization[7:]
+

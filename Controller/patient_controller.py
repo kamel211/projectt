@@ -3,7 +3,7 @@ import aiosmtplib
 from email.mime.text import MIMEText
 import logging
 import random
-from database import otp_collection, patients_collection  
+from database import otp_collection, patients_collection  , temp_patients_collection
 from Controller.otp_controller import PatientController
 from fastapi import HTTPException, Depends, Request, status
 from passlib.context import CryptContext
@@ -57,8 +57,9 @@ class LoginPatientRequest(BaseModel):
     password: str
 
 class ChangePasswordRequest(BaseModel):
-    old_password: str
-    new_password: str
+    email: str           # أضفنا البريد هنا
+    new_password: str    # حذفنا old_password لأنه غير مطلوب بعد OTP
+
 
 class UpdatePatientRequest(BaseModel):
     first_name: Optional[str] = None
@@ -109,38 +110,99 @@ def verify_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
-# ================== تسجيل مريض جديد ==================
-async def register_patient(request: CreatePatientRequest):
-    # تحقق إذا كان المستخدم موجود مسبقًا
-    existing_patient = await patients_collection.find_one({
-    "$or": [{"username": request.username}, {"email": request.email}]
-})
+async def confirm_registration(email: str, otp: str):
+    # تحقق من OTP
+    await patient_controller.verify_otp(email, otp)
 
+    # جلب بيانات المريض المؤقتة
+    temp_user = await temp_patients_collection.find_one({"email": email})
+    if not temp_user:
+        raise HTTPException(status_code=404, detail="No registration request found")
 
-    if existing_patient:
-        if existing_patient["username"] == request.username:
-            raise HTTPException(status_code=400, detail="Username already exists")
-        else:
-            raise HTTPException(status_code=400, detail="Email already exists")
-
-    # تشفير الباسورد
-    hashed_password = bcrypt_context.hash(truncate_password(request.password))
+    # إنشاء الحساب في قاعدة البيانات الرئيسية
     new_patient = {
-        "email": request.email,
-        "username": request.username,
-        "first_name": request.first_name,
-        "last_name": request.last_name,
+        "email": temp_user["email"],
+        "username": temp_user["username"],
+        "first_name": temp_user["first_name"],
+        "last_name": temp_user["last_name"],
+        "hashed_password": temp_user["hashed_password"],
+        "phone_number": temp_user["phone_number"],
         "role": "patient",
-        "hashed_password": hashed_password,
-        "phone_number": request.phone_number,
         "appointments": [],
         "is_active": True,
         "created_at": datetime.utcnow()
     }
-
-    # إدخال المستخدم الجديد في قاعدة البيانات
     result = await patients_collection.insert_one(new_patient)
-    return {"message": "Patient registered successfully", "patient_id": str(result.inserted_id)}
+
+    # حذف السجل المؤقت
+    await temp_patients_collection.delete_one({"email": email})
+
+    return {"message": "تم التحقق والتسجيل بنجاح ✅", "patient_id": str(result.inserted_id)}
+async def register_patient(request: CreatePatientRequest):
+    # تحقق إذا كان البريد أو الاسم مستخدم مسبقًا في الحساب النهائي
+    existing_patient = await patients_collection.find_one({
+        "$or": [{"username": request.username}, {"email": request.email}]
+    })
+    if existing_patient:
+        raise HTTPException(status_code=400, detail="Username or Email already exists")
+
+    # حذف أي سجل مؤقت قديم
+    await temp_patients_collection.delete_one({"email": request.email})
+
+    # تشفير الباسورد
+    hashed_password = bcrypt_context.hash(truncate_password(request.password))
+
+    # تخزين البيانات مؤقتًا
+    temp_patient = {
+        "email": request.email,
+        "username": request.username,
+        "first_name": request.first_name,
+        "last_name": request.last_name,
+        "hashed_password": hashed_password,
+        "phone_number": request.phone_number,
+        "created_at": datetime.utcnow()
+    }
+    await temp_patients_collection.insert_one(temp_patient)
+
+    # إرسال OTP
+    otp_code = await patient_controller.store_otp(request.email)
+    await patient_controller.send_email(request.email, otp_code)
+
+    return {"message": "تم إرسال رمز التحقق إلى البريد الإلكتروني. أكمل التسجيل بعد التحقق من OTP."}
+
+
+# # ================== تسجيل مريض جديد ==================
+# async def register_patient(request: CreatePatientRequest):
+#     # تحقق إذا كان المستخدم موجود مسبقًا
+#     existing_patient = await patients_collection.find_one({
+#     "$or": [{"username": request.username}, {"email": request.email}]
+# })
+
+
+#     if existing_patient:
+#         if existing_patient["username"] == request.username:
+#             raise HTTPException(status_code=400, detail="Username already exists")
+#         else:
+#             raise HTTPException(status_code=400, detail="Email already exists")
+
+#     # تشفير الباسورد
+#     hashed_password = bcrypt_context.hash(truncate_password(request.password))
+#     new_patient = {
+#         "email": request.email,
+#         "username": request.username,
+#         "first_name": request.first_name,
+#         "last_name": request.last_name,
+#         "role": "patient",
+#         "hashed_password": hashed_password,
+#         "phone_number": request.phone_number,
+#         "appointments": [],
+#         "is_active": True,
+#         "created_at": datetime.utcnow()
+#     }
+
+#     # إدخال المستخدم الجديد في قاعدة البيانات
+#     result = await patients_collection.insert_one(new_patient)
+#     return {"message": "Patient registered successfully", "patient_id": str(result.inserted_id)}
 
 
 
@@ -167,7 +229,7 @@ async def login_patient(request_data: LoginPatientRequest, request: Request):
         )
 
     # 2️⃣ Find patient in the database
-    patient = patients_collection.find_one(query)
+    patient =await  patients_collection.find_one(query)
 
     # 3️⃣ Check if patient exists and password is correct
     if not patient:
@@ -213,15 +275,36 @@ async def login_patient(request_data: LoginPatientRequest, request: Request):
 # ================== المريض الحالي ==================
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/patients/login")
 
+# # ================== تغيير كلمة المرور ==================
+# async def change_password_after_otp(request_data: ChangePasswordRequest):
+#     """
+#     تغيير كلمة مرور المريض بعد التحقق من OTP بدون الحاجة إلى JWT.
+#     """
+#     # جلب المريض حسب البريد
+#     patient = await patients_collection.find_one({"email": request_data.email})
+#     if not patient:
+#         raise HTTPException(status_code=404, detail="Patient not found")
 
-def get_current_patient(token: str = Depends(oauth2_scheme)):
+#     # تشفير كلمة المرور الجديدة
+#     hashed_password = bcrypt_context.hash(truncate_password(request_data.new_password))
+#     await patients_collection.update_one(
+#         {"email": request_data.email},
+#         {"$set": {"hashed_password": hashed_password}}
+#     )
+
+#     return {"message": "Password updated successfully"}
+
+
+
+# ================== جلب المريض الحالي ==================
+async def get_current_patient(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
         if email is None:
             raise HTTPException(status_code=401, detail="Invalid token: no email found")
         
-        patient = patients_collection.find_one({"email": email})
+        patient = await patients_collection.find_one({"email": email})
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
         
@@ -232,31 +315,18 @@ def get_current_patient(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+
+# ================== مسار تغيير كلمة المرور ==================
+
+
 # ================== تسجيل الخروج ==================
 def logout_patient(token: str):
     blacklisted_tokens.add(token)
     return {"message": "Logged out successfully"}
 
 
-# ================== تغيير كلمة المرور ==================
-def change_password(request_data: ChangePasswordRequest, current_patient):
-    if not bcrypt_context.verify(request_data.old_password, current_patient["hashed_password"]):
-        raise HTTPException(status_code=400, detail="كلمة المرور القديمة غير صحيحة")
-
-    if bcrypt_context.verify(request_data.new_password, current_patient["hashed_password"]):
-        raise HTTPException(status_code=400, detail="كلمة المرور الجديدة يجب أن تكون مختلفة عن القديمة")
-
-    hashed_new_password = bcrypt_context.hash(truncate_password(request_data.new_password))
-    patients_collection.update_one(
-        {"_id": ObjectId(current_patient["_id"])},
-        {"$set": {"hashed_password": hashed_new_password}}
-    )
-
-    return {"message": "تم تغيير كلمة المرور بنجاح ✅"}
-
-
 # ================== تحديث الملف الشخصي ==================
-def update_patient_profile(update_data: UpdatePatientRequest, current_patient):
+async def update_patient_profile(update_data: UpdatePatientRequest, current_patient):
     updates = {}
 
     if update_data.first_name:
@@ -264,45 +334,35 @@ def update_patient_profile(update_data: UpdatePatientRequest, current_patient):
     if update_data.last_name:
         updates["last_name"] = update_data.last_name
     if update_data.phone_number:
-        existing_phone = patients_collection.find_one({
+        existing_phone = await patients_collection.find_one({
             "phone_number": update_data.phone_number,
             "_id": {"$ne": ObjectId(current_patient["_id"])}
         })
         if existing_phone:
-            raise HTTPException(status_code=400, detail="رقم الهاتف مستخدم من قبل ❌")
+            raise HTTPException(status_code=400, detail="Phone number already used ❌")
         updates["phone_number"] = update_data.phone_number
     if update_data.email:
-        existing_email = patients_collection.find_one({
+        existing_email = await patients_collection.find_one({
             "email": update_data.email,
             "_id": {"$ne": ObjectId(current_patient["_id"])}
         })
         if existing_email:
-            raise HTTPException(status_code=400, detail="البريد الإلكتروني مستخدم مسبقًا ❌")
+            raise HTTPException(status_code=400, detail="Email already exists ❌")
         updates["email"] = update_data.email
     if update_data.username:
-        existing_patient = patients_collection.find_one({
+        existing_patient = await patients_collection.find_one({
             "username": update_data.username,
             "_id": {"$ne": ObjectId(current_patient["_id"])}
         })
         if existing_patient:
-            raise HTTPException(status_code=409, detail="اسم المستخدم مستخدم مسبقًا ❌")
+            raise HTTPException(status_code=409, detail="Username already exists ❌")
         updates["username"] = update_data.username
 
     if updates:
-        patients_collection.update_one({"_id": ObjectId(current_patient["_id"])}, {"$set": updates})
+        await patients_collection.update_one({"_id": ObjectId(current_patient["_id"])}, {"$set": updates})
 
-    updated_patient = patients_collection.find_one({"_id": ObjectId(current_patient["_id"])})
-    updated_patient["_id"] = str(updated_patient["_id"])
-
-    profile_data = {
-        "full_name": f"{updated_patient['first_name']} {updated_patient['last_name']}".strip(),
-        "username": updated_patient["username"],
-        "email": updated_patient["email"],
-        "phone_number": updated_patient.get("phone_number", "")
-    }
-
-    return {"message": "تم تحديث البيانات بنجاح ✅", "patient": profile_data}
-
+    updated_patient = await patients_collection.find_one({"_id": ObjectId(current_patient["_id"])})
+    return {"message": "Profile updated successfully ✅", "patient": updated_patient}
 
 # ================== عرض الملف الشخصي ==================
 def get_profile_for_current_patient(current_patient: dict):
@@ -323,12 +383,12 @@ def get_profile_for_current_patient(current_patient: dict):
 doctors_collection = mongo_db["doctors"]
 
 # ================== جلب كل معلومات دكتور ==================
-def get_doctor_info(doctor_id: str):
+async def get_doctor_info(doctor_id: str):
     """
     ترجع كل بيانات الدكتور بناءً على الID.
     """
 
-    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
 
@@ -339,13 +399,12 @@ def get_doctor_info(doctor_id: str):
     return doctor
 
 # ================== جلب كل الدكاترة ==================
-def get_all_doctors_info():
+async def get_all_doctors_info():
     """
     ترجع قائمة بكل الدكاترة.
     """
-    doctors_cursor = doctors_collection.find()
     doctors_list = []
-    for doc in doctors_cursor:
+    async for doc in doctors_collection.find():
         doc["_id"] = str(doc["_id"])
         doctors_list.append(doc)
     return doctors_list
@@ -364,6 +423,23 @@ ALGORITHM = "HS256"
 class PatientController:
     def __init__(self):
         self.otp_collection = otp_collection  # تم تعريفها داخل الكلاس
+    async def change_password_after_otp(self, request_data: ChangePasswordRequest):
+        """
+        تغيير كلمة مرور المريض بعد التحقق من OTP بدون الحاجة إلى JWT.
+        """
+        # جلب المريض حسب البريد
+        patient = await patients_collection.find_one({"email": request_data.email})
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # تشفير كلمة المرور الجديدة
+        hashed_password = bcrypt_context.hash(truncate_password(request_data.new_password))
+        await patients_collection.update_one(
+            {"email": request_data.email},
+            {"$set": {"hashed_password": hashed_password}}
+        )
+
+        return {"message": "Password updated successfully"}
 
     async def startup_event(self):
         await self.otp_collection.create_index("expires", expireAfterSeconds=0)
@@ -378,7 +454,7 @@ class PatientController:
         doc = {
             "email": email, 
             "otp": otp_code,
-            "expires": datetime.utcnow() + timedelta(minutes=5),
+            "expires": datetime.utcnow() + timedelta(minutes=2),
             "attempts": 0
         }
         result = await self.otp_collection.update_one({"email": email}, {"$set": doc}, upsert=True)
@@ -468,3 +544,5 @@ class PatientController:
 
 # إنشاء instance من ال controller
 patient_controller = PatientController()
+
+

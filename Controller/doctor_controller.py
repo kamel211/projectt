@@ -101,9 +101,9 @@ def register_doctor_with_cv(
 
 # ============= تسجيل الدخول =============
 
-def login_doctor(request_data: LoginDoctorModel, request: Request):
+async def login_doctor(request_data: LoginDoctorModel, request: Request):
     # 1️⃣ Check if doctor exists by username or email
-    doctor = doctors_collection.find_one({
+    doctor =await  doctors_collection.find_one({
         "$or": [{"username": request_data.username}, {"email": request_data.email}]
     })
 

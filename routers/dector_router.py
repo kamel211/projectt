@@ -25,8 +25,8 @@ def register_doctor_with_cv(
 
 # ✅ تسجيل الدخول
 @router.post("/login")
-def login_doctor(request: LoginDoctorModel, req: Request):
-    return doctor_controller.login_doctor(request, req)
+async def login_doctor(request: LoginDoctorModel, req: Request):
+     return await doctor_controller.login_doctor(request, req)
 
 
 # ✅ الحصول على بياناتي

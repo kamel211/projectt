@@ -155,13 +155,13 @@ async def login_doctor(request_data: LoginDoctorModel, request: Request):
         }
     }
 # ============= تحديث الملف الشخصي =============
-def update_doctor(update_data: UpdateDoctorModel, current_user):
-    updates = {k: v for k, v in update_data.dict().items() if v is not None}
-    if not updates:
-        raise HTTPException(status_code=400, detail="لا يوجد بيانات لتحديثها")
+# def update_doctor(update_data: UpdateDoctorModel, current_user):
+#     updates = {k: v for k, v in update_data.dict().items() if v is not None}
+#     if not updates:
+#         raise HTTPException(status_code=400, detail="لا يوجد بيانات لتحديثها")
 
-    doctors_collection.update_one({"_id": ObjectId(current_user["_id"])}, {"$set": updates})
-    return {"message": "تم تحديث البيانات بنجاح ✅"}
+#     doctors_collection.update_one({"_id": ObjectId(current_user["_id"])}, {"$set": updates})
+#     return {"message": "تم تحديث البيانات بنجاح ✅"}
 
 
 # ============= الحصول على بيانات المستخدم الحالي =============

@@ -19,7 +19,7 @@ try:
     otp_collection = mongo_db["otp_storage"]
     # مؤقتاً
     temp_patients_collection = mongo_db["temp_patients"]
-
+    messages_collection = mongo_db["messages"]
     print("✅ Connected to MongoDB successfully!")
 
 except ConnectionFailure as e:

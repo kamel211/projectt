@@ -165,10 +165,10 @@ async def login_doctor(request_data: LoginDoctorModel, request: Request):
 
 
 # ============= الحصول على بيانات المستخدم الحالي =============
-def get_current_doctor(token: str = Depends(oauth2_scheme)):
+async def get_current_doctor(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        doctor = doctors_collection.find_one({"_id": ObjectId(payload["id"])})
+        doctor = await doctors_collection.find_one({"_id": ObjectId(payload["id"])})
         if not doctor:
             raise HTTPException(status_code=404, detail="لم يتم العثور على الدكتور")
         doctor["_id"] = str(doctor["_id"])

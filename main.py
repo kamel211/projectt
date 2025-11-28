@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 # Routers
-from routers import patient_router
+from routers import chat_router, patient_router
 from routers import dector_router
 from routers import appointment_router
 from routers import admin_router
@@ -24,7 +24,7 @@ app.include_router(patient_router.router)
 app.include_router(dector_router.router)
 app.include_router(appointment_router.router)
 app.include_router(admin_router.admin_router)
-
+app.include_router(chat_router.router)
 # للصور
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 

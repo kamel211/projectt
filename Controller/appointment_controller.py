@@ -5,18 +5,19 @@ from datetime import datetime, time, timedelta
 from typing import List
 from pydantic import BaseModel
 from bson import ObjectId
-from database import appointments_collection ,patients_collection,doctors_collection
+from database import appointments_collection ,patients_collection,doctors_collection ,messages_collection
 import aiosmtplib
 from email.mime.text import MIMEText
 import asyncio
+
 from jose import jwt
 from datetime import datetime
 # -------------------- إعداد SMTP للإشعارات --------------------
 SMTP_SERVER = "smtp-relay.brevo.com"
-SMTP_PORT = 587
+SMTP_PORT = 465
 SMTP_LOGIN = "9b77a8001@smtp-brevo.com"
 SMTP_PASSWORD = "WSn3aDfVAKMhJwrd"
-FROM_EMAIL = "Douha Sharkawi <douhasharkawi@gmail.com>"
+FROM_EMAIL = "عياده الامل  <douhasharkawi@gmail.com>"
 
 # -------------------- نموذج المواعيد --------------------
 class AppointmentResponse(BaseModel):
@@ -73,7 +74,32 @@ def get_user_from_token(token: str, role_required: str = None):
 #
 #
 #
-#
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
+#____
 # -------------------- إرسال الإيميل --------------------
 #
 #
@@ -82,18 +108,92 @@ def get_user_from_token(token: str, role_required: str = None):
 #
 #----------------------------------------
 #
-
-async def notify_patient_email(patient_email: str, doctor_name: str, date_time: str, approved: bool):
-    subject = f"تحديث حول موعدك مع الدكتور {doctor_name}"
-    status_text = "تمت الموافقة على موعدك " if approved else "تم رفض موعدك "
+# إرسال إيميل عند الموافقة
+async def notify_approval_email(patient_email: str, doctor_name: str, date_time: str):
+    subject = f"تمت الموافقة على موعدك مع الدكتور {doctor_name}"
     content = (
         f"مرحباً،\n\n"
-        f"{status_text}\n"
-        f"تاريخ ووقت الموعد: {date_time}\n"
-        f"شكراً لاستخدامك نظامنا للحجز.\n\n"
-        f"مع تحيات فريقنا."
+        f"تمت الموافقة على موعدك بنجاح.\n"
+        f"تاريخ ووقت الموعد: {date_time}\n\n"
+        f"مع التحية."
     )
     asyncio.create_task(send_email_async(patient_email, subject, content))
+
+# إرسال إيميل عند الرفض
+async def notify_reject_email(patient_email: str, doctor_name: str, date_time: str):
+    subject = f"تم رفض موعدك مع الدكتور {doctor_name}"
+    content = (
+        f"مرحباً،\n\n"
+        f"تم رفض موعدك.\n"
+        f"تاريخ ووقت الموعد: {date_time}\n\n"
+        f"مع التحية."
+    )
+    asyncio.create_task(send_email_async(patient_email, subject, content))
+
+# -------------------- إرسال إيميل عند الحجز --------------------
+async def notify_booking_email(patient_email: str, doctor_name: str, date_time: str):
+    subject = f"تم استلام طلب حجز موعد مع الدكتور {doctor_name}"
+    content = (
+        f"مرحباً،\n\n"
+        f"لقد تم استلام طلب حجز موعدك وهو الآن بانتظار موافقة الطبيب.\n"
+        f"موعدك المقترح: {date_time}\n\n"
+        f"سوف يصلك إشعار عند الموافقة أو الرفض.\n\n"
+        f"مع التحية."
+    )
+    asyncio.create_task(send_email_async(patient_email, subject, content))
+
+
+# -------------------- إشعار عند إرجاع الموعد Pending --------------------
+async def notify_revert_email(patient_email: str, doctor_name: str, date_time: str):
+    subject = f"تم تعديل حالة موعدك مع الدكتور {doctor_name}"
+    content = (
+        f"مرحباً،\n\n"
+        f"قام الطبيب بإعادة ضبط حالة الموعد إلى (بانتظار الموافقة).\n"
+        f"تاريخ الموعد: {date_time}\n\n"
+        f"سيتم إعلامك عند الموافقة أو الرفض.\n"
+    )
+    asyncio.create_task(send_email_async(patient_email, subject, content))
+
+
+# -------------------- تذكير قبل الموعد بيوم --------------------
+async def send_appointment_reminder(patient_email: str, doctor_name: str, date_time: str):
+    subject = f"تذكير بموعدك غداً مع الدكتور {doctor_name}"
+    content = (
+        f"مرحباً،\n\n"
+        f"هذا تذكير لك بأن لديك موعد غداً:\n"
+        f"⏰ الوقت: {date_time}\n"
+        f"👨‍⚕️ مع الدكتور: {doctor_name}\n\n"
+        f"نتمنى لك السلامة."
+    )
+    asyncio.create_task(send_email_async(patient_email, subject, content))
+
+
+async def send_reminders_for_tomorrow():
+    now = datetime.now()
+    tomorrow = now + timedelta(days=1)
+
+    start = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0)
+    end = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 59)
+   
+    appointments = await appointments_collection.find({
+    "status": "Confirmed",
+    "date_time": {"$gte": start, "$lte": end}
+        }).to_list(length=None)
+
+
+    for app in appointments:
+        patient = await patients_collection.find_one({"_id": ObjectId(app["patient_id"])})
+        doctor = await doctors_collection.find_one({"_id": ObjectId(app["doctor_id"])})
+
+        if not patient or not doctor:
+            continue
+
+        date_time = datetime.fromisoformat(app["date_time"])
+        await send_appointment_reminder(
+            patient_email=patient["email"],
+            doctor_name=f"{doctor.get('first_name','')} {doctor.get('last_name','')}",
+            date_time=date_time.strftime("%Y-%m-%d %H:%M")
+        )
 
 
 async def send_email_async(recipient: str, subject: str, content: str):
@@ -106,7 +206,7 @@ async def send_email_async(recipient: str, subject: str, content: str):
             message,
             hostname=SMTP_SERVER,
             port=SMTP_PORT,
-            start_tls=True,
+            use_tls=True,  
             username=SMTP_LOGIN,
             password=SMTP_PASSWORD,
         )
@@ -118,6 +218,25 @@ async def send_email_async(recipient: str, subject: str, content: str):
 #----------------------------------------
 #
 #
+#
+#
+#
+#
+#
+#
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
+#=======
 #
 #
 # -------------------- حجز موعد --------------------
@@ -133,6 +252,12 @@ async def book_appointment(token: str, doctor_id: str, date_time: datetime, reas
     patient_id = payload.get("id")
     patient =await patients_collection.find_one({"_id": ObjectId(patient_id)})
     doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    # إرسال إيميل للمريض عند الحجز
+    await notify_booking_email(
+        patient_email=patient["email"],
+        doctor_name=f"{doctor.get('first_name', '')} {doctor.get('last_name', '')}",
+        date_time=date_time.strftime("%Y-%m-%d %H:%M")
+    )
 
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -201,7 +326,7 @@ async def book_appointment(token: str, doctor_id: str, date_time: datetime, reas
 #
 #----------------------------------------
 #
-async def approve_appointment(token: str, appointment_id: str, approve: bool):
+async def approve_appointment(token: str, appointment_id: str, approve: bool, revert: bool = False):
     # التحقق من هوية الدكتور
     payload = get_user_from_token(token, role_required="doctor")
     doctor_id = payload.get("id")
@@ -212,52 +337,86 @@ async def approve_appointment(token: str, appointment_id: str, approve: bool):
         raise HTTPException(status_code=404, detail="Appointment not found")
 
     if appointment["doctor_id"] != doctor_id:
-        raise HTTPException(status_code=403, detail="Not allowed to approve this appointment")
+        raise HTTPException(status_code=403, detail="Not allowed to modify this appointment")
 
-    if appointment["status"] != "Pending":
+    current_status = appointment["status"]
+
+    # -------------------------------------------
+    # 🔄 إرجاع الموعد إلى Pending
+    # -------------------------------------------
+    if revert:
+        if current_status in ["Rejected", "Confirmed"]:
+
+            await appointments_collection.update_one(
+                {"_id": ObjectId(appointment_id)},
+                {"$set": {"status": "Pending"}}
+            )
+
+            # إرسال الإيميل
+            patient = await patients_collection.find_one({"_id": ObjectId(appointment["patient_id"])})
+            doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+            raw_date = appointment["date_time"]
+            clean_date = raw_date.replace("Z", "")
+            date_time = datetime.fromisoformat(clean_date)
+
+            if patient and doctor:
+                await notify_revert_email(
+                    patient_email=patient["email"],
+                    doctor_name=f"{doctor.get('first_name','')} {doctor.get('last_name','')}",
+                    date_time=date_time.strftime("%Y-%m-%d %H:%M")
+                )
+
+            return {
+                "message": "Appointment returned to pending state",
+                "appointment_id": appointment_id,
+                "new_status": "Pending",
+                "display_status": "بانتظار الموافقة"
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Only confirmed or rejected appointments can be reverted")
+
+
+    # -------------------------------------------
+    # ✔️ الموافقة أو الرفض
+    # -------------------------------------------
+    if current_status != "Pending":
         raise HTTPException(status_code=400, detail="Appointment already processed")
 
-    # تحديد الحالة الجديدة
     new_status = "Confirmed" if approve else "Rejected"
 
-    # تحديث الموعد في MongoDB
     await appointments_collection.update_one(
         {"_id": ObjectId(appointment_id)},
         {"$set": {"status": new_status}}
     )
 
-    # ------------------------
-    #  تجهيز بيانات الإيميل
-    # ------------------------
+    # تجهيز معلومات الإيميل
     patient = await patients_collection.find_one({"_id": ObjectId(appointment["patient_id"])})
     doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
 
-    # معالجة التاريخ String → datetime
     raw_date = appointment["date_time"]
-
-    # إزالة Z إذا موجودة (بعض الأنظمة ترجع ISO مثل: "2025-11-18T13:30:00Z")
     clean_date = raw_date.replace("Z", "")
-
-    # التحويل الصحيح
     date_time = datetime.fromisoformat(clean_date)
 
-    # إرسال الإيميل إذا كانت البيانات كاملة
+    # -------------------------------------------
+    # 📧 إرسال الإيميل الصحيح:
+    # ✔️ notify_approval_email عند الموافقة
+    # ✔️ notify_reject_email عند الرفض
+    # -------------------------------------------
     if patient and doctor:
-        await  notify_patient_email(
+        if approve:
+            await notify_approval_email(
                 patient_email=patient["email"],
-                doctor_name=f"{doctor.get('first_name', '')} {doctor.get('last_name', '')}",
-                date_time=date_time.strftime("%Y-%m-%d %H:%M"),
-                approved=approve
-)
+                doctor_name=f"{doctor.get('first_name','')} {doctor.get('last_name','')}",
+                date_time=date_time.strftime("%Y-%m-%d %H:%M")
+            )
+        else:
+            await notify_reject_email(
+                patient_email=patient["email"],
+                doctor_name=f"{doctor.get('first_name','')} {doctor.get('last_name','')}",
+                date_time=date_time.strftime("%Y-%m-%d %H:%M")
+            )
 
-
-    # نص الحالة
-    status_display = {
-        "Confirmed": "تمت الموافقة",
-        "Rejected": "تم الرفض",
-        "Completed": "تم الإنجاز",
-        "Cancelled": "تم الإلغاء"
-    }.get(new_status, new_status)
+    status_display = "تمت الموافقة" if approve else "تم الرفض"
 
     return {
         "message": "Appointment updated successfully",
@@ -265,7 +424,73 @@ async def approve_appointment(token: str, appointment_id: str, approve: bool):
         "new_status": new_status,
         "display_status": status_display
     }
-#
+
+#  #
+# async def approve_appointment(token: str, appointment_id: str, approve: bool):
+#     # التحقق من هوية الدكتور
+#     payload = get_user_from_token(token, role_required="doctor")
+#     doctor_id = payload.get("id")
+
+#     # جلب الموعد
+#     appointment = await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+#     if not appointment:
+#         raise HTTPException(status_code=404, detail="Appointment not found")
+
+#     if appointment["doctor_id"] != doctor_id:
+#         raise HTTPException(status_code=403, detail="Not allowed to approve this appointment")
+
+#     if appointment["status"] != "Pending":
+#         raise HTTPException(status_code=400, detail="Appointment already processed")
+
+#     # تحديد الحالة الجديدة
+#     new_status = "Confirmed" if approve else "Rejected"
+
+#     # تحديث الموعد في MongoDB
+#     await appointments_collection.update_one(
+#         {"_id": ObjectId(appointment_id)},
+#         {"$set": {"status": new_status}}
+#     )
+
+#     # ------------------------
+#     #  تجهيز بيانات الإيميل
+#     # ------------------------
+#     patient = await patients_collection.find_one({"_id": ObjectId(appointment["patient_id"])})
+#     doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+
+#     # معالجة التاريخ String → datetime
+#     raw_date = appointment["date_time"]
+
+#     # إزالة Z إذا موجودة (بعض الأنظمة ترجع ISO مثل: "2025-11-18T13:30:00Z")
+#     clean_date = raw_date.replace("Z", "")
+
+#     # التحويل الصحيح
+#     date_time = datetime.fromisoformat(clean_date)
+
+#     # إرسال الإيميل إذا كانت البيانات كاملة
+#     if patient and doctor:
+#         await  notify_patient_email(
+#                 patient_email=patient["email"],
+#                 doctor_name=f"{doctor.get('first_name', '')} {doctor.get('last_name', '')}",
+#                 date_time=date_time.strftime("%Y-%m-%d %H:%M"),
+#                 approved=approve
+# )
+
+
+#     # نص الحالة
+#     status_display = {
+#         "Confirmed": "تمت الموافقة",
+#         "Rejected": "تم الرفض",
+#         "Completed": "تم الإنجاز",
+#         "Cancelled": "تم الإلغاء"
+#     }.get(new_status, new_status)
+
+#     return {
+#         "message": "Appointment updated successfully",
+#         "appointment_id": appointment_id,
+#         "new_status": new_status,
+#         "display_status": status_display
+#     }
+# #
 #----------------------------------------
 #
 #
@@ -402,15 +627,34 @@ async def cancel_appointment(token: str, appointment_id: str):
     payload = get_user_from_token(token, role_required="patient")
     patient_id = payload.get("id")
 
-    appointment =await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+    appointment = await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
     if appointment["patient_id"] != patient_id:
         raise HTTPException(status_code=403, detail="You cannot cancel this appointment")
 
-    if appointment["status"] in ["Cancelled", "Rejected"]:
-        raise HTTPException(status_code=400, detail="Appointment already cancelled")
+    status = appointment["status"]
+
+    if status not in ["Pending", "Confirmed"]:
+        raise HTTPException(status_code=400, detail="Cannot cancel this appointment")
+
+    # نضع الحالة PendingCancellation إذا طلب المريض الإلغاء
+    await appointments_collection.update_one(
+        {"_id": ObjectId(appointment_id)},
+        {"$set": {"status": "PendingCancellation"}}
+    )
+
+    return {"message": "Cancellation request sent, waiting for doctor's approval."}
+
+# دالة للدكتور للموافقة على الإلغاء
+async def approve_cancellation(appointment_id: str):
+    appointment = await appointments_collection.find_one({"_id": ObjectId(appointment_id)})
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if appointment["status"] != "PendingCancellation":
+        raise HTTPException(status_code=400, detail="No pending cancellation to approve")
 
     await appointments_collection.update_one(
         {"_id": ObjectId(appointment_id)},
@@ -418,14 +662,6 @@ async def cancel_appointment(token: str, appointment_id: str):
     )
 
     return {"message": "Appointment cancelled successfully"}
-
-#
-#----------------------------------------
-#
-#
-#
-#
-#
 #
 #
 #
@@ -501,3 +737,44 @@ async def get_token(authorization: str = Header(...)):
         raise HTTPException(status_code=401, detail="Invalid token")
     return authorization[7:]
 
+
+
+
+
+async def send_daily_doctor_notifications():
+    now = datetime.now()
+    today_start = datetime(now.year, now.month, now.day, 0, 0)
+    today_end = datetime(now.year, now.month, now.day, 23, 59)
+
+    doctors = await doctors_collection.find({}).to_list(length=None)
+    for doctor in doctors:
+        doctor_id = str(doctor["_id"])
+        doctor_email = doctor.get("email")
+        if not doctor_email:
+            continue
+    
+        # المواعيد اليوم
+        appointments = await appointments_collection.find({
+            "doctor_id": doctor_id,
+            "status": {"$in": ["Pending", "Confirmed"]},
+            "date_time": {"$gte": today_start, "$lte": today_end}
+        }).to_list(length=None)
+    
+        # الرسائل الجديدة
+        new_messages = await messages_collection.find({
+            "receiver_id": doctor_id,
+            "seen": False
+        }).to_list(length=None)
+    
+        content = f"مرحباً دكتور {doctor.get('first_name','')} {doctor.get('last_name','')},\n\n"
+        content += f"لديك {len(appointments)} مواعيد اليوم.\n"
+        content += f"لديك {len(new_messages)} رسائل جديدة لم تُقرأ.\n\n"
+        content += "يرجى التحقق منها في لوحة التحكم.\nمع التحية."
+    
+        # 👈 هنا استبدل create_task بـ await
+        await send_email_async(
+            recipient=doctor_email,
+            subject="تنبيه يومي: تحقق من مواعيدك ورسائلك",
+            content=content
+        )
+    

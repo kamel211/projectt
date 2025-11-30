@@ -1,9 +1,12 @@
 # appointment_router.py
+from database import appointments_collection 
 
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime
 from Controller.appointment_controller import (
+    approve_cancellation,
     book_appointment,
     cancel_appointment,
     complete_appointment,
@@ -11,7 +14,8 @@ from Controller.appointment_controller import (
     get_doctor_appointments,
     approve_appointment,
     get_available_slots,
-    get_token
+    get_token,
+    send_reminders_for_tomorrow
 )
 from Controller.doctor_controller import get_all_doctors
 
@@ -72,9 +76,10 @@ async def list_doctors(token: str = Depends(oauth2_scheme)):
 #
 #----------------------------------------
 #
+
 @router.post("/cancel/{appointment_id}")
 async def cancel(appointment_id: str, token: str = Depends(oauth2_scheme)):
-    return  await cancel_appointment(token, appointment_id)
+    return await cancel_appointment(token, appointment_id)
 
 #
 #----------------------------------------
@@ -128,11 +133,17 @@ async def doctor_appointments(token: str = Depends(oauth2_scheme)):
 @router.post("/approve/{appointment_id}")
 async def approve_route(
     appointment_id: str,
-    approve: bool = Query(...),
-    token: str = Depends(get_token)
+    approve: bool = Query(None),   
+    revert: bool = Query(False),   
+    token: str = Depends(oauth2_scheme)
 ):
-    return await approve_appointment(token, appointment_id, approve)
-#
+    return await approve_appointment(
+        token=token,
+        appointment_id=appointment_id,
+        approve=approve,
+        revert=revert
+    )
+
 #----------------------------------------
 #
 #
@@ -172,3 +183,34 @@ async def available_slots(doctor_id: str, date: str, token: str = Depends(oauth2
 @router.post("/complete/{appointment_id}")
 async def complete(appointment_id: str, token: str = Depends(oauth2_scheme)):
     return await  complete_appointment(token, appointment_id)
+
+
+
+
+@router.post("/cancel/approve/{appointment_id}")
+async def approve_cancel(appointment_id: str, token: str = Depends(get_token)):
+    # تحقق من الصلاحيات إذا لازم
+    return await approve_cancellation(appointment_id)
+
+
+
+@router.delete("/delete/{appointment_id}")
+async def delete_appointment(appointment_id: str):
+    # تحقق أن المعرف صالح
+    try:
+        obj_id = ObjectId(appointment_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="معرف الموعد غير صالح")
+
+    result = await appointments_collection.delete_one({"_id": obj_id})
+
+    if result.deleted_count == 1:
+        return {"message": "تم حذف الموعد بنجاح"}
+    else:
+        raise HTTPException(status_code=404, detail="الموعد غير موجود")
+    
+
+@router.get("/send-reminders")
+async def run_reminders():
+    await send_reminders_for_tomorrow()
+    return {"message": "Reminders sent"}

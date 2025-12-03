@@ -1,79 +1,87 @@
-from database import mongo_db
-from bson import ObjectId
+# admin_controller.py
+from passlib.context import CryptContext
+from jose import jwt, JWTError
+from datetime import datetime, timedelta
 from fastapi import HTTPException
-from pydantic import BaseModel, EmailStr
-from typing import List
+from bson import ObjectId
+from database import doctors_collection,patients_collection,admins_collection
 
-doctors_collection = mongo_db["doctors"]
-admins_collection = mongo_db["admins"]
 
-# =========================
-# Admin Models
-class AdminCreateModel(BaseModel):
-    email: EmailStr
-    username: str
-    password: str
+bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = "mysecretkey"
+ALGORITHM = "HS256"
 
-class AdminLoginModel(BaseModel):
-    email: EmailStr
-    password: str
- # python -m venv venv
+class AdminController:
 
-# تحقق إذا فيه Admin
-def is_admin_exists() -> bool:
-    return admins_collection.count_documents({}) > 0
 
-# إنشاء حساب Admin إذا ما فيه حساب
-def create_admin(admin: AdminCreateModel):
-    if is_admin_exists():
-        raise HTTPException(status_code=403, detail="لا يمكنك إنشاء أكثر من حساب Admin")
+
+    async def register(self, email: str, password: str):
+        # تحقق من وجود Admin مسبقاً
+        existing = await admins_collection.find_one({"email": email})
+        if existing:
+            raise HTTPException(status_code=400, detail="Admin already exists")
+
+        hashed_password = bcrypt_context.hash(password)
+        new_admin = {
+            "email": email,
+            "hashed_password": hashed_password,
+            "created_at": datetime.utcnow(),
+            "role": "admin",
+            "is_active": True
+        }
+
+        result = await admins_collection.insert_one(new_admin)
+        return {"id": str(result.inserted_id), "email": email}
     
-    result = admins_collection.insert_one({
-        "email": admin.email,
-        "username": admin.username,
-        "password": admin.password
-    })
-    return {"message": "تم إنشاء حساب Admin بنجاح ✅", "id": str(result.inserted_id)}
 
-# تسجيل دخول Admin
-def login_admin(admin: AdminLoginModel):
-    account = admins_collection.find_one({"email": admin.email})
-    if not account:
-        raise HTTPException(status_code=404, detail="الحساب غير موجود")
-    if account["password"] != admin.password:
-        raise HTTPException(status_code=401, detail="كلمة المرور خاطئة")
-    return {"message": f"تم تسجيل الدخول بنجاح كـ Admin: {account['username']}"}
 
-# =========================
-# Doctors logic
-def doctor_serializer(doctor) -> dict:
-    return {
-        "id": str(doctor["_id"]),
-        "username": doctor["username"],
-        "email": doctor["email"],
-        "first_name": doctor["first_name"],
-        "last_name": doctor["last_name"],
-        "phone_number": doctor.get("phone_number", ""),
-        "role": doctor.get("role", "doctor"),
-        "cv_url": doctor.get("cv_url", ""),
-        "is_approved": doctor.get("is_approved", False),
-        "created_at": doctor.get("created_at")
-    }
+    def create_access_token(self, username: str, expires_delta: timedelta = timedelta(hours=4)):
+        payload = {"sub": username, "exp": datetime.utcnow() + expires_delta}
+        return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def get_pending_doctors() -> List[dict]:
-    pending = doctors_collection.find({"is_approved": False})
-    return [doctor_serializer(doc) for doc in pending]
+    async def login(self, email: str, password: str):
+        admin = await admins_collection.find_one({"email": email})
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin not found")
 
-def approve_doctor(doctor_id: str) -> dict:
-    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
-    if not doctor:
-        raise HTTPException(status_code=404, detail="Doctor not found")
-    doctors_collection.update_one({"_id": ObjectId(doctor_id)}, {"$set": {"is_approved": True}})
-    return {"message": f"Doctor {doctor['first_name']} {doctor['last_name']} approved ✅"}
+        if not bcrypt_context.verify(password, admin["hashed_password"]):
+            raise HTTPException(status_code=401, detail="Incorrect password")
 
-def reject_doctor(doctor_id: str) -> dict:
-    doctor = doctors_collection.find_one({"_id": ObjectId(doctor_id)})
-    if not doctor:
-        raise HTTPException(status_code=404, detail="Doctor not found")
-    doctors_collection.delete_one({"_id": ObjectId(doctor_id)})
-    return {"message": f"Doctor {doctor['first_name']} {doctor['last_name']} rejected ❌"}
+        # إنشاء توكن JWT
+        payload = {"sub": email, "exp": datetime.utcnow() + timedelta(hours=4)}
+        token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+        return {"access_token": token, "token_type": "bearer"}
+
+
+    async def get_all_users(self):
+        doctors = await doctors_collection.find().to_list(length=100)
+        patients = await patients_collection.find().to_list(length=100)
+
+        def serialize(user):
+            user["_id"] = str(user["_id"])
+            return user
+
+        return {
+            "doctors": [serialize(d) for d in doctors],
+            "patients": [serialize(p) for p in patients]
+        }
+
+    async def update_doctor(self, doctor_id: str, is_active: bool = None, is_approved: bool = None):
+        doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        updates = {}
+        if is_active is not None:
+            updates["is_active"] = is_active
+        if is_approved is not None:
+            updates["is_approved"] = is_approved
+
+        if updates:
+            await doctors_collection.update_one({"_id": ObjectId(doctor_id)}, {"$set": updates})
+
+        updated_doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+        updated_doctor["_id"] = str(updated_doctor["_id"])
+        return updated_doctor
+
+admin_controller = AdminController()

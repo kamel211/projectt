@@ -1,53 +1,64 @@
-import os
+from fastapi import APIRouter, Depends, Form, UploadFile, File
+from fastapi import HTTPException, Request
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, Depends
-from Controller import doctor_controller
-from model.doctor_model import LoginDoctorModel, UpdateDoctorModel
-from Controller.doctor_controller import get_all_doctors, get_current_doctor, get_doctor_by_id, update_doctor  
-router = APIRouter(prefix="/doctors", tags=["Doctors"])
+from model.doctor_model import UpdateDoctorModel, LoginDoctorModel
+from model.otp_model import OTPRequest, OTPVerifyRequest
+from Controller.doctor_controller import doctor_controller, get_all_doctors, get_current_doctor, get_doctor_by_id, register_doctor_temp, login_doctor, confirm_doctor_registration, update_doctor
 
+router = APIRouter(
+    prefix="/doctors",
+    tags=["Doctors"]
+)
 
-# ✅ تسجيل دكتور جديد مع رفع CV
-@router.post("/register")
-def register_doctor_with_cv(
+# ---------------- تسجيل دكتور مؤقت + رفع CV ----------------
+@router.post("/register-temp")
+async def register_temp(
     username: str = Form(...),
     email: str = Form(...),
     first_name: str = Form(...),
     last_name: str = Form(...),
     password: str = Form(...),
     phone_number: str = Form(...),
-    role: str = Form("doctor"),
+    role: str = Form(...),
     cv_file: UploadFile = File(...)
 ):
-    return doctor_controller.register_doctor_with_cv(
-        username, email, first_name, last_name, password, phone_number, role, cv_file
+    return await register_doctor_temp(
+        username=username,
+        email=email,
+        first_name=first_name,
+        last_name=last_name,
+        password=password,
+        phone_number=phone_number,
+        role=role,
+        cv_file=cv_file
     )
 
-# ✅ تسجيل الدخول
+# ---------------- تأكيد التسجيل عبر OTP ----------------
+@router.post("/confirm-registration")
+async def confirm_registration(email: str, otp: str):
+    return await confirm_doctor_registration(email, otp)
+
+# ---------------- تسجيل دخول الدكتور ----------------
 @router.post("/login")
-async def login_doctor(request: LoginDoctorModel, req: Request):
-     return await doctor_controller.login_doctor(request, req)
+async def login(request_data: LoginDoctorModel, request: Request):
+    return await login_doctor(request_data, request)
 
+# ---------------- إرسال OTP لتسجيل الدخول ----------------
+@router.post("/send-otp")
+async def send_otp(request: OTPRequest):
+    return await doctor_controller.send_otp_endpoint(request)
 
-# ✅ الحصول على بياناتي
+# ---------------- التحقق من OTP عند تسجيل الدخول ----------------
+@router.post("/verify-login-otp")
+async def verify_login_otp(request: OTPVerifyRequest):
+    return await doctor_controller.verify_login_otp(request)
+
+# ---------------- الحصول على بيانات الدكتور الحالي ----------------
 @router.get("/me")
-def get_my_data(current_user=Depends(doctor_controller.get_current_doctor)):
+async def get_me(current_user: dict = Depends(get_current_doctor)):
     return current_user
 
-# ===========================
-# 📌 الحصول على جميع الدكاترة
-# ===========================
-@router.get("/all")
-async def all_doctors():
-    return {"status": True, "data": get_all_doctors()}
-
-@router.get("/{doctor_id}")
-async def doctor_by_id(doctor_id: str):
-    doctor = get_doctor_by_id(doctor_id)
-    if not doctor:
-        raise HTTPException(status_code=404, detail="Doctor not found")
-    return doctor
-
+# ---------------- تحديث بيانات الدكتور ----------------
 
 @router.put("/update")
 async def update_profile(
@@ -88,8 +99,8 @@ async def update_profile(
         update_data.profile_image_url = file_path  # حفظ مسار الصورة
 
     # تحديث بيانات الدكتور
-    doctor = update_doctor(update_data, current_user)
-
+    doctor = await update_doctor(update_data, current_user)
+    
     return {
         "status": "success",
         "message": "Profile updated successfully",
@@ -97,14 +108,15 @@ async def update_profile(
     }
 
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# ---------------- الحصول على كل الدكاترة ----------------
+@router.get("/all")
+async def all_doctors():
+    return get_all_doctors()
 
-@router.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
-    # حفظ الملف
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_location, "wb") as f:
-        contents = await file.read()
-        f.write(contents)
-    return {"filename": file.filename, "message": "Upload successful"}
+# ---------------- الحصول على دكتور حسب ID ----------------
+@router.get("/{doctor_id}")
+async def get_doctor(doctor_id: str):
+    doctor = get_doctor_by_id(doctor_id)
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    return doctor

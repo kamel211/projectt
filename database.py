@@ -13,12 +13,14 @@ try:
     mongo_db = mongo_client["university_project"]
     
     # اختيار الـ Collections
+    admins_collection = mongo_db["admins"]
     doctors_collection = mongo_db["doctors"]
     appointments_collection = mongo_db["appointments"]
     patients_collection = mongo_db["patients"]
     otp_collection = mongo_db["otp_storage"]
     # مؤقتاً
     temp_patients_collection = mongo_db["temp_patients"]
+    temp_doctors_collection = mongo_db["temp_doctors"]
     messages_collection = mongo_db["messages"]
     print("✅ Connected to MongoDB successfully!")
 

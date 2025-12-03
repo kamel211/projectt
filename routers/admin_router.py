@@ -1,36 +1,56 @@
-from fastapi import APIRouter
-from typing import List
-from Controller.admin_controller import (
-    get_pending_doctors, approve_doctor, reject_doctor,
-    create_admin, login_admin, AdminCreateModel, AdminLoginModel,is_admin_exists
-)
+# admin_router.py
+from fastapi import APIRouter, Depends, Body, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel, EmailStr
+from Controller.admin_controller import admin_controller
+from jose import jwt, JWTError
 
-admin_router = APIRouter(prefix="/admin", tags=["Admin"])
+# ----------------- Models -----------------
+class AdminRegisterModel(BaseModel):
+    email: EmailStr
+    password: str
 
-# ---------- Admin Routes ----------
-@admin_router.post("/create")
-def api_create_admin(admin: AdminCreateModel):
-    return create_admin(admin)
+class AdminLoginModel(BaseModel):
+    email: EmailStr
+    password: str
 
-@admin_router.post("/login")
-def api_login_admin(admin: AdminLoginModel):
-    return login_admin(admin)
+# ----------------- Router -----------------
+router = APIRouter(prefix="/admin", tags=["Admin"])
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/login")
 
+SECRET_KEY = "mysecretkey"
+ALGORITHM = "HS256"
 
-@admin_router.get("/check")
-def api_check_admin():
-    exists = is_admin_exists()
-    return {"exists": exists}
+# ----------------- Token dependency -----------------
+async def get_current_admin(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return {"username": username}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-# ---------- Doctors Routes ----------
-@admin_router.get("/pending-doctors", response_model=List[dict])
-def api_get_pending_doctors():
-    return get_pending_doctors()
+# ----------------- Endpoints -----------------
 
-@admin_router.put("/approve-doctor/{doctor_id}")
-def api_approve_doctor(doctor_id: str):
-    return approve_doctor(doctor_id)
+@router.post("/register")
+async def register_admin(admin: AdminRegisterModel):
+    return await admin_controller.register(admin.email, admin.password)
 
-@admin_router.put("/reject-doctor/{doctor_id}")
-def api_reject_doctor(doctor_id: str):
-    return reject_doctor(doctor_id)
+@router.post("/login")
+async def login_admin(admin: AdminLoginModel):
+    return await admin_controller.login(admin.email, admin.password)
+
+@router.get("/users")
+async def get_users(current_admin=Depends(get_current_admin)):
+    return await admin_controller.get_all_users()
+
+@router.put("/doctor/update/{doctor_id}")
+async def update_doctor_status(
+    doctor_id: str,
+    is_active: bool = Body(None),
+    is_approved: bool = Body(None),
+    current_admin=Depends(get_current_admin)
+):
+    return await admin_controller.update_doctor(doctor_id, is_active, is_approved)

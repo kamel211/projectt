@@ -27,7 +27,7 @@ def read_root():
 app.include_router(patient_router.router)
 app.include_router(dector_router.router)
 app.include_router(appointment_router.router)
-app.include_router(admin_router.admin_router)
+app.include_router(admin_router.router)
 app.include_router(chat_router.router)
 # للصور
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -53,8 +53,8 @@ async def startup_event():
     scheduler.start()
     print(f"✅ تم تشغيل Scheduler وسيتم إرسال الإيميل الساعة 18:00")
     
-    # 👈 إرسال تجريبي الآن
-    await send_daily_doctor_notifications()
-    print("✅ تم إرسال الإيميل التجريبي الآن")
+    # # 👈 إرسال تجريبي الآن
+    # await send_daily_doctor_notifications()
+    # print("✅ تم إرسال الإيميل التجريبي الآن")
 
 

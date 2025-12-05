@@ -5,11 +5,16 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from bson import ObjectId
 from database import doctors_collection,patients_collection,admins_collection
+import aiosmtplib
+from email.mime.text import MIMEText
 
 
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = "mysecretkey"
 ALGORITHM = "HS256"
+
+
+
 
 class AdminController:
 
@@ -70,18 +75,148 @@ class AdminController:
         doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
         if not doctor:
             raise HTTPException(status_code=404, detail="Doctor not found")
-
+    
         updates = {}
         if is_active is not None:
             updates["is_active"] = is_active
         if is_approved is not None:
             updates["is_approved"] = is_approved
-
+    
         if updates:
             await doctors_collection.update_one({"_id": ObjectId(doctor_id)}, {"$set": updates})
+    
+        doctor_name = f"{doctor['first_name']} {doctor['last_name']}"
+    
+        # ✅ إرسال بريد عند الموافقة
+        if is_approved:
+            await send_doctor_approval_email(doctor['email'], doctor_name)
 
+        # ✅ إرسال بريد عند التفعيل أو الإلغاء
+        if is_active is not None:
+            await send_doctor_activation_email(doctor['email'], doctor_name, is_active)
+    
         updated_doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
         updated_doctor["_id"] = str(updated_doctor["_id"])
         return updated_doctor
 
+    async def update_patient(self, patient_id: str, is_active: bool = None):
+        patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        updates = {}
+        if is_active is not None:
+            updates["is_active"] = is_active
+
+        if updates:
+            await patients_collection.update_one({"_id": ObjectId(patient_id)}, {"$set": updates})
+
+        patient_name = f"{patient['first_name']} {patient['last_name']}"
+
+        # إرسال إيميل عند التفعيل أو الإلغاء
+        if is_active is not None:
+            await send_patient_activation_email(patient['email'], patient_name, is_active)
+
+        updated_patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
+        updated_patient["_id"] = str(updated_patient["_id"])
+        return updated_patient
+
 admin_controller = AdminController()
+
+
+
+
+
+
+
+
+
+SMTP_SERVER = "smtp-relay.brevo.com"
+SMTP_PORT = 465
+SMTP_LOGIN = "9b77a8001@smtp-brevo.com"
+SMTP_PASSWORD = "WSn3aDfVAKMhJwrd"
+FROM_EMAIL = "عياده الامل <douhasharkawi@gmail.com>"
+
+async def send_doctor_approval_email(recipient_email: str, doctor_name: str):
+    message = MIMEText(f"""
+مرحباً {doctor_name},
+
+✅ تم الموافقة على حسابك في عيادة الأمل.
+يمكنك الآن تسجيل الدخول واستخدام حسابك.
+
+شكراً لاختيارك عيادتنا
+""", "plain", "utf-8")
+
+    message["From"] = FROM_EMAIL
+    message["To"] = recipient_email
+    message["Subject"] = "تمت الموافقة على حسابك في عيادة الأمل"
+
+    await aiosmtplib.send(
+        message,
+        hostname=SMTP_SERVER,
+        port=SMTP_PORT,
+        use_tls=True,
+        username=SMTP_LOGIN,
+        password=SMTP_PASSWORD
+    )
+
+
+
+async def send_doctor_activation_email(recipient_email: str, doctor_name: str, is_active: bool):
+    status_text = "تم تفعيل حسابك بنجاح ✅" if is_active else "تم إلغاء تنشيط حسابك ❌"
+    message = MIMEText(f"""
+مرحباً {doctor_name},
+
+{status_text} في عيادة الأمل.
+
+لأي استفسار يرجى التواصل مع الدعم الفني:
+batainehkamel2@gmail.com
+
+شكراً لتعاونك معنا.
+""", "plain", "utf-8")
+
+    message["From"] = FROM_EMAIL
+    message["To"] = recipient_email
+    message["Subject"] = "تحديث حالة حسابك - عيادة الأمل"
+
+    await aiosmtplib.send(
+        message,
+        hostname=SMTP_SERVER,
+        port=SMTP_PORT,
+        use_tls=True,
+        username=SMTP_LOGIN,
+        password=SMTP_PASSWORD
+    )
+
+
+
+
+async def send_patient_activation_email(recipient_email: str, patient_name: str, is_active: bool):
+    status_text = "تم تفعيل حسابك بنجاح ✅" if is_active else "تم إلغاء تنشيط حسابك ❌"
+
+    # إنشاء الرسالة
+    body = f"""
+مرحباً {patient_name},
+
+{status_text} في عيادة الأمل.
+
+لأي استفسار يرجى التواصل مع الدعم الفني:
+batainehkamel2@gmail.com
+
+شكراً لتعاونك معنا.
+"""
+
+    message = MIMEText(body, _subtype="plain", _charset="utf-8")  # مهم للعرض الكامل بالعربي
+    message["From"] = FROM_EMAIL
+    message["To"] = recipient_email
+    message["Subject"] = "تحديث حالة حسابك - عيادة الأمل"
+
+    # إرسال الإيميل
+    await aiosmtplib.send(
+        message,
+        hostname=SMTP_SERVER,
+        port=SMTP_PORT,
+        use_tls=True,
+        username=SMTP_LOGIN,
+        password=SMTP_PASSWORD
+    )

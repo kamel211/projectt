@@ -1,9 +1,11 @@
 # admin_router.py
 from fastapi import APIRouter, Depends, Body, HTTPException
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
-from Controller.admin_controller import admin_controller
+from Controller.admin_controller import admin_controller 
 from jose import jwt, JWTError
+from database import patients_collection
 
 # ----------------- Models -----------------
 class AdminRegisterModel(BaseModel):
@@ -17,6 +19,8 @@ class AdminLoginModel(BaseModel):
 # ----------------- Router -----------------
 router = APIRouter(prefix="/admin", tags=["Admin"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/login")
+
+
 
 SECRET_KEY = "mysecretkey"
 ALGORITHM = "HS256"
@@ -42,7 +46,7 @@ async def register_admin(admin: AdminRegisterModel):
 async def login_admin(admin: AdminLoginModel):
     return await admin_controller.login(admin.email, admin.password)
 
-@router.get("/users")
+@router.get("/doctor")
 async def get_users(current_admin=Depends(get_current_admin)):
     return await admin_controller.get_all_users()
 
@@ -54,3 +58,29 @@ async def update_doctor_status(
     current_admin=Depends(get_current_admin)
 ):
     return await admin_controller.update_doctor(doctor_id, is_active, is_approved)
+
+
+@router.get("/patients")
+async def get_all_patients():
+    patients = await patients_collection.find().to_list(length=200)
+
+    # تحويل ObjectId إلى نص
+    for p in patients:
+        p["_id"] = str(p["_id"])
+
+    return patients
+
+
+# ---------------- تغيير حالة المريض ----------------
+@router.put("/patient/{patient_id}/toggle_active")
+async def toggle_patient_active(patient_id: str, payload: dict):
+    """
+    تغيير حالة تفعيل المريض (نشط / غير نشط)
+    payload: {"is_active": true/false}
+    """
+    is_active = payload.get("is_active")
+    if is_active is None:
+        raise HTTPException(status_code=400, detail="is_active field is required")
+
+    updated_patient = await admin_controller.update_patient(patient_id, is_active)
+    return {"message": "Patient status updated", "patient": updated_patient}
